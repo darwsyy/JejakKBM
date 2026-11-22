@@ -151,3 +151,12 @@ python -m pytest -q
 - `PUT /journal-sessions/{session_id}` memperbaiki materi dan waktu aktual sesi saat jurnal `DRAFT`.
 - `PUT /attendance/{attendance_id}` memperbaiki status absensi saat jurnal `DRAFT`, hanya oleh guru pengajar sesi.
 - Setelah diperbaiki, gunakan kembali `POST /journals/{journal_id}/submit`. Jika jurnal pernah diminta revisi, status berubah menjadi `RESUBMITTED` dan masuk kembali ke antrean pemeriksaan. Riwayat pemeriksaan sebelumnya tetap disimpan.
+
+
+### Penugasan guru piket
+
+- `POST /duty-rosters` membuat penugasan guru piket berdasarkan tanggal. Request berisi `duty_date`, `teacher_user_id`, dan `assigned_by_user_id`. Hanya admin aktif yang dapat membuat penugasan dan guru yang ditugaskan harus aktif.
+- `GET /duty-rosters` menampilkan semua penugasan; gunakan `?duty_date=YYYY-MM-DD` untuk satu tanggal.
+- `DELETE /duty-rosters/{roster_id}?admin_user_id=1` menghapus penugasan dengan persetujuan akun admin aktif.
+- Seorang guru boleh mendapat beberapa tanggal piket, dan satu tanggal boleh memiliki beberapa guru piket. Guru yang memeriksa jurnal harus terdaftar pada tanggal jurnal tersebut.
+- Karena login belum dibuat, ID admin dan guru masih dikirim dalam request; ini validasi role sementara untuk pengembangan lokal.

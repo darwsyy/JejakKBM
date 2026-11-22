@@ -1094,6 +1094,13 @@ def submit_ready_journal(client):
             "teacher_id": teacher["id"], "attendance_status": "PRESENT",
         })
         assert response.status_code == 201
+    admin = create_user(client, "admin_piket", role="admin").json()
+    roster = client.post("/duty-rosters", json={
+        "duty_date": "2026-11-23",
+        "teacher_user_id": teacher["id"],
+        "assigned_by_user_id": admin["id"],
+    })
+    assert roster.status_code == 201
     submitted = client.post(f"/journals/{session['journal_id']}/submit", json={"officer_user_id": 1})
     assert submitted.status_code == 200
     return session, teacher
@@ -1158,6 +1165,13 @@ def test_journal_revision_cycle_and_resubmission(client):
         assert response.status_code == 201
 
     journal_id = session["journal_id"]
+    admin = create_user(client, "admin_revisi", role="admin").json()
+    roster = client.post("/duty-rosters", json={
+        "duty_date": "2026-11-23",
+        "teacher_user_id": teacher["id"],
+        "assigned_by_user_id": admin["id"],
+    })
+    assert roster.status_code == 201
     submitted = client.post(f"/journals/{journal_id}/submit", json={"officer_user_id": 1})
     assert submitted.status_code == 200
     revision = client.post(f"/journals/{journal_id}/review", json={
@@ -1188,3 +1202,69 @@ def test_journal_revision_cycle_and_resubmission(client):
     assert resubmitted.json()["status"] == "RESUBMITTED"
     assert any(item["id"] == journal_id for item in client.get("/reviews/inbox").json())
     assert len(client.get(f"/journals/{journal_id}/reviews").json()) == 1
+
+
+
+def test_admin_can_assign_and_filter_duty_roster(client):
+    admin = create_user(client, "admin_roster", role="admin").json()
+    teacher = create_user(client, "guru_roster", role="teacher").json()
+    created = client.post("/duty-rosters", json={
+        "duty_date": "2026-11-23",
+        "teacher_user_id": teacher["id"],
+        "assigned_by_user_id": admin["id"],
+    })
+    assert created.status_code == 201
+    assert created.json()["teacher_user_id"] == teacher["id"]
+    filtered = client.get("/duty-rosters?duty_date=2026-11-23")
+    assert filtered.status_code == 200
+    assert len(filtered.json()) == 1
+
+
+def test_duty_roster_rejects_duplicate_and_non_teacher(client):
+    admin = create_user(client, "admin_roster2", role="admin").json()
+    teacher = create_user(client, "guru_roster2", role="teacher").json()
+    student_user = create_user(client, "petugas_roster", role="class_officer").json()
+    payload = {
+        "duty_date": "2026-11-24",
+        "teacher_user_id": teacher["id"],
+        "assigned_by_user_id": admin["id"],
+    }
+    assert client.post("/duty-rosters", json=payload).status_code == 201
+    assert client.post("/duty-rosters", json=payload).status_code == 409
+    invalid = client.post("/duty-rosters", json={
+        **payload, "teacher_user_id": student_user["id"],
+    })
+    assert invalid.status_code == 400
+
+
+def test_duty_roster_requires_admin_and_can_be_deleted(client):
+    admin = create_user(client, "admin_roster3", role="admin").json()
+    teacher = create_user(client, "guru_roster3", role="teacher").json()
+    not_admin = client.post("/duty-rosters", json={
+        "duty_date": "2026-11-25", "teacher_user_id": teacher["id"],
+        "assigned_by_user_id": teacher["id"],
+    })
+    assert not_admin.status_code == 403
+    created = client.post("/duty-rosters", json={
+        "duty_date": "2026-11-25", "teacher_user_id": teacher["id"],
+        "assigned_by_user_id": admin["id"],
+    })
+    assert created.status_code == 201
+    deleted = client.delete(f"/duty-rosters/{created.json()['id']}?admin_user_id={admin['id']}")
+    assert deleted.status_code == 204
+    assert client.get("/duty-rosters?duty_date=2026-11-25").json() == []
+
+
+def test_teacher_without_duty_roster_cannot_review(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    for slot_id in slot_ids:
+        client.post(f"/journal-sessions/{session['id']}/attendance", json={
+            "slot_id": slot_id, "student_id": student["id"],
+            "teacher_id": teacher["id"], "attendance_status": "PRESENT",
+        })
+    submitted = client.post(f"/journals/{session['journal_id']}/submit", json={"officer_user_id": 1})
+    assert submitted.status_code == 200
+    response = client.post(f"/journals/{session['journal_id']}/review", json={
+        "reviewer_user_id": teacher["id"], "decision": "APPROVE",
+    })
+    assert response.status_code == 403

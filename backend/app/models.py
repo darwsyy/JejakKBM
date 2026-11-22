@@ -198,3 +198,15 @@ class JournalReview(Base):
     decision: Mapped[str] = mapped_column(String(30), nullable=False)
     notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     reviewed_at: Mapped[object] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
+class DutyRoster(Base):
+    __tablename__ = "duty_rosters"
+    __table_args__ = (
+        UniqueConstraint("duty_date", "teacher_user_id", name="unique_teacher_duty_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    duty_date: Mapped[object] = mapped_column(Date, nullable=False)
+    teacher_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    assigned_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)

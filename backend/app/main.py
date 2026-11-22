@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    AttendanceRecord, ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, JournalReview, JournalSession, JournalSessionSlot, ScheduleSlot, ScheduleTeacherAssignment,
+    AttendanceRecord, ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, DutyRoster, JournalReview, JournalSession, JournalSessionSlot, ScheduleSlot, ScheduleTeacherAssignment,
     ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
@@ -16,6 +16,8 @@ from app.schemas import (
     JournalSubmitRequest,
     JournalReviewCreate,
     JournalReviewResponse,
+    DutyRosterCreate,
+    DutyRosterResponse,
     JournalRevisionStart,
     JournalSessionUpdate,
     AttendanceUpdate,
@@ -1421,6 +1423,65 @@ def submit_daily_journal(
     return journal
 
 
+@app.post("/duty-rosters", response_model=DutyRosterResponse, status_code=status.HTTP_201_CREATED, tags=["Duty Rosters"])
+def create_duty_roster(data: DutyRosterCreate, db: Session = Depends(get_db)):
+    admin = db.query(User).filter(User.id == data.assigned_by_user_id).first()
+    if admin is None or admin.role != "admin" or not admin.is_active:
+        raise HTTPException(status_code=403, detail="Penugasan hanya dapat dibuat oleh akun admin aktif.")
+    teacher = db.query(User).filter(User.id == data.teacher_user_id).first()
+    if teacher is None or teacher.role != "teacher" or not teacher.is_active:
+        raise HTTPException(status_code=400, detail="Guru piket harus menggunakan akun guru aktif.")
+    existing = db.query(DutyRoster).filter(
+        DutyRoster.duty_date == data.duty_date,
+        DutyRoster.teacher_user_id == data.teacher_user_id,
+    ).first()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Guru tersebut sudah ditugaskan pada tanggal itu.")
+    roster = DutyRoster(
+        duty_date=data.duty_date,
+        teacher_user_id=data.teacher_user_id,
+        assigned_by_user_id=data.assigned_by_user_id,
+    )
+    db.add(roster)
+    db.commit()
+    db.refresh(roster)
+    return DutyRosterResponse(
+        id=roster.id, duty_date=roster.duty_date,
+        teacher_user_id=teacher.id, teacher_name=teacher.full_name,
+        username=teacher.username, assigned_by_user_id=roster.assigned_by_user_id,
+    )
+
+
+@app.get("/duty-rosters", response_model=list[DutyRosterResponse], tags=["Duty Rosters"])
+def get_duty_rosters(duty_date: date | None = None, db: Session = Depends(get_db)):
+    query = db.query(DutyRoster)
+    if duty_date is not None:
+        query = query.filter(DutyRoster.duty_date == duty_date)
+    rosters = query.order_by(DutyRoster.duty_date, DutyRoster.id).all()
+    results = []
+    for roster in rosters:
+        teacher = db.query(User).filter(User.id == roster.teacher_user_id).first()
+        results.append(DutyRosterResponse(
+            id=roster.id, duty_date=roster.duty_date,
+            teacher_user_id=roster.teacher_user_id, teacher_name=teacher.full_name,
+            username=teacher.username, assigned_by_user_id=roster.assigned_by_user_id,
+        ))
+    return results
+
+
+@app.delete("/duty-rosters/{roster_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Duty Rosters"])
+def delete_duty_roster(roster_id: int, admin_user_id: int, db: Session = Depends(get_db)):
+    admin = db.query(User).filter(User.id == admin_user_id).first()
+    if admin is None or admin.role != "admin" or not admin.is_active:
+        raise HTTPException(status_code=403, detail="Hanya admin aktif yang dapat menghapus penugasan.")
+    roster = db.query(DutyRoster).filter(DutyRoster.id == roster_id).first()
+    if roster is None:
+        raise HTTPException(status_code=404, detail="Penugasan piket tidak ditemukan.")
+    db.delete(roster)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.get("/reviews/inbox", response_model=list[DailyJournalResponse], tags=["Journal Reviews"])
 def get_review_inbox(db: Session = Depends(get_db)):
     return db.query(DailyJournal).filter(
@@ -1438,6 +1499,12 @@ def review_daily_journal(journal_id: int, data: JournalReviewCreate, db: Session
     reviewer = db.query(User).filter(User.id == data.reviewer_user_id).first()
     if reviewer is None or reviewer.role != "teacher" or not reviewer.is_active:
         raise HTTPException(status_code=403, detail="Pemeriksa harus akun guru yang aktif.")
+    duty = db.query(DutyRoster).filter(
+        DutyRoster.duty_date == journal.journal_date,
+        DutyRoster.teacher_user_id == reviewer.id,
+    ).first()
+    if duty is None:
+        raise HTTPException(status_code=403, detail="Guru tidak terdaftar sebagai petugas piket pada tanggal jurnal.")
     status_by_decision = {"APPROVE": "APPROVED", "REQUEST_REVISION": "REVISION_REQUIRED", "REJECT": "REJECTED"}
     journal.status = status_by_decision[data.decision]
     review = JournalReview(journal_id=journal_id, reviewer_user_id=reviewer.id, decision=data.decision, notes=data.notes.strip() if data.notes else None)

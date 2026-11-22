@@ -314,3 +314,18 @@ class JournalSessionUpdate(BaseModel):
 class AttendanceUpdate(BaseModel):
     teacher_id: int = Field(ge=1)
     attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "ABSENT"]
+
+
+class DutyRosterCreate(BaseModel):
+    duty_date: date
+    teacher_user_id: int = Field(ge=1)
+    assigned_by_user_id: int = Field(ge=1)
+
+
+class DutyRosterResponse(BaseModel):
+    id: int
+    duty_date: date
+    teacher_user_id: int
+    teacher_name: str
+    username: str
+    assigned_by_user_id: int
