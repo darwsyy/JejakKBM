@@ -1,5 +1,5 @@
 from app.database import Base, engine
-from app import models  # noqa: F401 - memastikan model User terdaftar
+from app import models  # noqa: F401 - mendaftarkan semua model
 
 Base.metadata.create_all(bind=engine)
 

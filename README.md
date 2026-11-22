@@ -4,7 +4,7 @@ Sistem jurnal Kegiatan Belajar Mengajar (KBM) digital.
 
 ## Status proyek
 
-Tahap awal: fondasi backend dan database lokal. Fitur login, jurnal KBM, absensi, aplikasi Android, dan dashboard admin akan dibuat bertahap.
+Tahap awal: backend API dan database lokal. Fitur login, jurnal KBM, absensi, aplikasi Android, dan dashboard admin akan dibuat bertahap.
 
 ## Teknologi
 
@@ -36,7 +36,7 @@ Jika environment sudah pernah dibuat, tidak perlu membuatnya lagi. Cukup aktifka
 python backend/create_db.py
 ```
 
-Perintah tersebut membuat file `jejak_kbm.db` dan tabel awal `users` jika belum tersedia.
+Perintah tersebut membuat file `jejak_kbm.db` dan tabel `users` serta `classes` jika belum tersedia.
 
 ## Menjalankan API
 
@@ -46,16 +46,24 @@ python -m uvicorn app.main:app --app-dir backend --reload
 
 Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 
+## Endpoint yang tersedia
+
+| Method | Alamat | Fungsi |
+|---|---|---|
+| GET | /health | Memeriksa API |
+| POST | /users | Menambah pengguna |
+| GET | /users | Melihat pengguna |
+| POST | /classes | Menambah kelas |
+| GET | /classes | Melihat kelas |
+
 ## Menjalankan tes
 
 ```powershell
 python -m pytest -q
 ```
 
-## Endpoint awal
-
-- `GET /health` — memeriksa apakah API berjalan.
-
 ## Catatan
 
-File database lokal tidak dimasukkan ke Git. Database saat ini hanya untuk pengembangan; data sekolah sungguhan belum digunakan.
+- Saat ini belum ada login atau pembatasan akses. Endpoint hanya untuk pengembangan lokal.
+- File database lokal tidak dimasukkan ke Git.
+- Jangan gunakan data pribadi siswa sungguhan untuk pengujian.
