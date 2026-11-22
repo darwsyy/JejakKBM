@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class UserCreate(BaseModel):
@@ -38,3 +39,48 @@ class ClassOfficerResponse(BaseModel):
     user_id: int
     username: str
     full_name: str
+
+
+class ScheduleSlotData(BaseModel):
+    day_of_week: Literal[
+        "Monday", "Tuesday", "Wednesday", "Thursday",
+        "Friday", "Saturday", "Sunday",
+    ]
+    slot_order: int = Field(ge=1)
+    jp_number: int | None = Field(default=None, ge=1)
+    start_time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    end_time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    slot_type: Literal[
+        "LESSON", "ASSEMBLY", "COCURRICULAR",
+        "BREAK", "FREE", "SPECIAL_EVENT",
+    ]
+
+    @model_validator(mode="after")
+    def validate_schedule_time(self):
+        start = datetime.strptime(self.start_time, "%H:%M")
+        end = datetime.strptime(self.end_time, "%H:%M")
+
+        if end <= start:
+            raise ValueError("Jam selesai harus setelah jam mulai.")
+
+        if self.jp_number is not None:
+            duration = (end - start).total_seconds() / 60
+            if duration != 45:
+                raise ValueError("Slot yang memiliki nomor JP harus berdurasi 45 menit.")
+
+        return self
+
+
+class ScheduleSlotCreate(ScheduleSlotData):
+    pass
+
+
+class ScheduleSlotUpdate(ScheduleSlotData):
+    pass
+
+
+class ScheduleSlotResponse(ScheduleSlotData):
+    id: int
+    class_id: int
+
+    model_config = ConfigDict(from_attributes=True)

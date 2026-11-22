@@ -174,3 +174,120 @@ def test_assignment_rejects_missing_class_or_user(client, class_id, user_id):
     response = client.put(f"/classes/{class_id}/officer/{user_id}")
 
     assert response.status_code == 404
+
+
+def test_create_and_list_schedule_slots(client):
+    classroom = create_classroom(client, "X TKJ 1")
+    class_id = classroom.json()["id"]
+
+    response = client.post(
+        f"/classes/{class_id}/schedule-slots",
+        json={
+            "day_of_week": "Monday",
+            "slot_order": 1,
+            "jp_number": 1,
+            "start_time": "07:45",
+            "end_time": "08:30",
+            "slot_type": "LESSON",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["slot_type"] == "LESSON"
+
+    list_response = client.get(f"/classes/{class_id}/schedule-slots?day=Monday")
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == 1
+
+
+def test_schedule_slot_rejects_invalid_jp_duration(client):
+    classroom = create_classroom(client, "X TKJ 1")
+
+    response = client.post(
+        f"/classes/{classroom.json()['id']}/schedule-slots",
+        json={
+            "day_of_week": "Monday",
+            "slot_order": 1,
+            "jp_number": 1,
+            "start_time": "07:45",
+            "end_time": "08:20",
+            "slot_type": "LESSON",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_schedule_slot_rejects_duplicate_order(client):
+    classroom = create_classroom(client, "X TKJ 1")
+    class_id = classroom.json()["id"]
+    slot_data = {
+        "day_of_week": "Monday",
+        "slot_order": 1,
+        "jp_number": 1,
+        "start_time": "07:45",
+        "end_time": "08:30",
+        "slot_type": "LESSON",
+    }
+
+    first_response = client.post(
+        f"/classes/{class_id}/schedule-slots", json=slot_data
+    )
+    second_response = client.post(
+        f"/classes/{class_id}/schedule-slots",
+        json={**slot_data, "jp_number": 2, "start_time": "08:30", "end_time": "09:15"},
+    )
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 409
+
+
+def test_schedule_slot_can_be_updated_and_deleted(client):
+    classroom = create_classroom(client, "X TKJ 1")
+    class_id = classroom.json()["id"]
+    response = client.post(
+        f"/classes/{class_id}/schedule-slots",
+        json={
+            "day_of_week": "Monday",
+            "slot_order": 1,
+            "jp_number": None,
+            "start_time": "10:00",
+            "end_time": "10:15",
+            "slot_type": "BREAK",
+        },
+    )
+    slot_id = response.json()["id"]
+
+    update_response = client.put(
+        f"/schedule-slots/{slot_id}",
+        json={
+            "day_of_week": "Monday",
+            "slot_order": 1,
+            "jp_number": None,
+            "start_time": "10:00",
+            "end_time": "10:15",
+            "slot_type": "SPECIAL_EVENT",
+        },
+    )
+    delete_response = client.delete(f"/schedule-slots/{slot_id}")
+
+    assert update_response.status_code == 200
+    assert update_response.json()["slot_type"] == "SPECIAL_EVENT"
+    assert delete_response.status_code == 204
+    assert client.get(f"/classes/{class_id}/schedule-slots").json() == []
+
+
+def test_schedule_slot_requires_existing_class(client):
+    response = client.post(
+        "/classes/999/schedule-slots",
+        json={
+            "day_of_week": "Monday",
+            "slot_order": 1,
+            "jp_number": 1,
+            "start_time": "07:45",
+            "end_time": "08:30",
+            "slot_type": "LESSON",
+        },
+    )
+
+    assert response.status_code == 404

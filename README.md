@@ -36,7 +36,7 @@ Jika environment sudah pernah dibuat, tidak perlu membuatnya lagi. Cukup aktifka
 python backend/create_db.py
 ```
 
-Perintah tersebut membuat file `jejak_kbm.db` dan tabel `users`, `classes`, serta `class_officer_assignments` jika belum tersedia.
+Perintah tersebut membuat file `jejak_kbm.db` dan tabel yang diperlukan jika belum tersedia, termasuk data pengguna, kelas, petugas kelas, dan jadwal.
 
 ## Menjalankan API
 
@@ -57,6 +57,10 @@ Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 | GET | /classes | Melihat kelas |
 | PUT | /classes/{class_id}/officer/{user_id} | Menetapkan petugas jurnal utama |
 | GET | /classes/{class_id}/officer | Melihat petugas jurnal utama kelas |
+| POST | /classes/{class_id}/schedule-slots | Menambahkan slot jadwal kelas |
+| GET | /classes/{class_id}/schedule-slots | Melihat slot jadwal kelas (opsional filter `?day=Monday`) |
+| PUT | /schedule-slots/{slot_id} | Mengubah slot jadwal |
+| DELETE | /schedule-slots/{slot_id} | Menghapus slot jadwal |
 
 ## Menjalankan tes
 
@@ -70,3 +74,5 @@ python -m pytest -q
 - File database lokal tidak dimasukkan ke Git.
 - Jangan gunakan data pribadi siswa sungguhan untuk pengujian.
 - Penugasan petugas utama belum menyediakan fitur pergantian petugas.
+- Slot jadwal menyimpan hari, urutan, nomor JP (opsional), jam, dan jenis kegiatan.
+- Slot dengan nomor JP harus berdurasi 45 menit. Slot istirahat/kegiatan khusus tidak perlu memiliki nomor JP.

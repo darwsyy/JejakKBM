@@ -3,13 +3,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ClassOfficerAssignment, Classroom, User
+from app.models import ClassOfficerAssignment, Classroom, ScheduleSlot, User
 from app.schemas import (
     ClassOfficerResponse,
     ClassroomCreate,
     ClassroomResponse,
     UserCreate,
     UserResponse,
+    ScheduleSlotCreate,
+    ScheduleSlotResponse,
+    ScheduleSlotUpdate,
 )
 
 app = FastAPI(
@@ -186,3 +189,123 @@ def get_class_officer(class_id: int, db: Session = Depends(get_db)):
         username=user.username,
         full_name=user.full_name,
     )
+
+
+@app.post(
+    "/classes/{class_id}/schedule-slots",
+    response_model=ScheduleSlotResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Schedule"],
+)
+def create_schedule_slot(
+    class_id: int,
+    data: ScheduleSlotCreate,
+    db: Session = Depends(get_db),
+):
+    classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
+    if classroom is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Kelas tidak ditemukan.",
+        )
+
+    slot = ScheduleSlot(class_id=class_id, **data.model_dump())
+    db.add(slot)
+
+    try:
+        db.commit()
+        db.refresh(slot)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Urutan slot atau nomor JP pada hari tersebut sudah digunakan.",
+        )
+
+    return slot
+
+
+@app.get(
+    "/classes/{class_id}/schedule-slots",
+    response_model=list[ScheduleSlotResponse],
+    tags=["Schedule"],
+)
+def get_schedule_slots(
+    class_id: int,
+    day: str | None = None,
+    db: Session = Depends(get_db),
+):
+    classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
+    if classroom is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Kelas tidak ditemukan.",
+        )
+
+    query = db.query(ScheduleSlot).filter(ScheduleSlot.class_id == class_id)
+    if day is not None:
+        valid_days = [
+            "Monday", "Tuesday", "Wednesday", "Thursday",
+            "Friday", "Saturday", "Sunday",
+        ]
+        if day not in valid_days:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Nama hari tidak valid.",
+            )
+        query = query.filter(ScheduleSlot.day_of_week == day)
+
+    return query.order_by(
+        ScheduleSlot.day_of_week,
+        ScheduleSlot.slot_order,
+    ).all()
+
+
+@app.put(
+    "/schedule-slots/{slot_id}",
+    response_model=ScheduleSlotResponse,
+    tags=["Schedule"],
+)
+def update_schedule_slot(
+    slot_id: int,
+    data: ScheduleSlotUpdate,
+    db: Session = Depends(get_db),
+):
+    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == slot_id).first()
+    if slot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Slot jadwal tidak ditemukan.",
+        )
+
+    for field, value in data.model_dump().items():
+        setattr(slot, field, value)
+
+    try:
+        db.commit()
+        db.refresh(slot)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Urutan slot atau nomor JP pada hari tersebut sudah digunakan.",
+        )
+
+    return slot
+
+
+@app.delete(
+    "/schedule-slots/{slot_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Schedule"],
+)
+def delete_schedule_slot(slot_id: int, db: Session = Depends(get_db)):
+    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == slot_id).first()
+    if slot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Slot jadwal tidak ditemukan.",
+        )
+
+    db.delete(slot)
+    db.commit()
