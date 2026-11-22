@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    AttendanceRecord, ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, DutyRoster, JournalReview, JournalSession, JournalSessionSlot, ScheduleSlot, ScheduleTeacherAssignment, TeacherAbsenceReport,
+    AttendanceRecord, ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, DutyRoster, JournalReview, JournalSession, JournalSessionSlot, Notification, ScheduleSlot, ScheduleTeacherAssignment, TeacherAbsenceReport,
     ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
@@ -15,6 +15,7 @@ from app.schemas import (
     ClassDashboardReviewResponse,
     TeacherAbsenceReportCreate,
     TeacherAbsenceReportResponse,
+    NotificationResponse,
     DailyDashboardResponse,
     ClassOfficerResponse,
     DailyJournalCreate,
@@ -65,6 +66,25 @@ app = FastAPI(
 async def health_check() -> dict[str, str]:
     """Return the basic availability status of the API."""
     return {"status": "ok", "service": "jejak-kbm-api"}
+
+
+def add_notification(
+    db: Session,
+    recipient_user_id: int,
+    journal_id: int,
+    notification_type: str,
+    title: str,
+    message: str,
+):
+    notification = Notification(
+        recipient_user_id=recipient_user_id,
+        journal_id=journal_id,
+        notification_type=notification_type,
+        title=title,
+        message=message,
+    )
+    db.add(notification)
+    return notification
 
 
 @app.post(
@@ -1075,7 +1095,16 @@ def create_journal_session(
             raise HTTPException(status_code=400, detail="Setiap JP harus memiliki mata pelajaran dan guru pada jadwal.")
         subject_ids.add(subject_assignment.subject_id)
         if teacher_assignment.teacher_id != data.teacher_id:
-            raise HTTPException(status_code=400, detail="Guru sesi harus sesuai dengan guru yang ditugaskan pada seluruh JP.")
+            absence_report = db.query(TeacherAbsenceReport).filter(
+                TeacherAbsenceReport.journal_id == journal_id,
+                TeacherAbsenceReport.slot_id == slot.id,
+                TeacherAbsenceReport.scheduled_teacher_id == teacher_assignment.teacher_id,
+            ).first()
+            if absence_report is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Guru sesi harus sesuai jadwal. Jika guru terjadwal tidak hadir, petugas kelas harus membuat laporan ketidakhadiran terlebih dahulu.",
+                )
 
     if len(subject_ids) != 1:
         raise HTTPException(status_code=400, detail="JP yang digabung harus memiliki mata pelajaran yang sama.")
@@ -1450,7 +1479,25 @@ def submit_daily_journal(
         JournalReview.journal_id == journal_id,
         JournalReview.decision == "REQUEST_REVISION",
     ).first()
-    journal.status = "RESUBMITTED" if previous_revision is not None else "SUBMITTED"
+    is_resubmission = previous_revision is not None
+    journal.status = "RESUBMITTED" if is_resubmission else "SUBMITTED"
+
+    classroom = db.query(Classroom).filter(Classroom.id == journal.class_id).first()
+    duty_teachers = db.query(DutyRoster).filter(
+        DutyRoster.duty_date == journal.journal_date
+    ).all()
+    notification_type = "JOURNAL_RESUBMITTED" if is_resubmission else "JOURNAL_SUBMITTED"
+    notification_title = "Jurnal dikirim ulang" if is_resubmission else "Jurnal baru menunggu pemeriksaan"
+    notification_message = (
+        f"Jurnal kelas {classroom.name} tanggal {journal.journal_date} "
+        f"{'dikirim ulang' if is_resubmission else 'telah dikirim'} dan menunggu pemeriksaan."
+    )
+    for duty_teacher in duty_teachers:
+        add_notification(
+            db, duty_teacher.teacher_user_id, journal.id, notification_type,
+            notification_title, notification_message,
+        )
+
     db.commit()
     db.refresh(journal)
     return journal
@@ -1542,6 +1589,20 @@ def review_daily_journal(journal_id: int, data: JournalReviewCreate, db: Session
     journal.status = status_by_decision[data.decision]
     review = JournalReview(journal_id=journal_id, reviewer_user_id=reviewer.id, decision=data.decision, notes=data.notes.strip() if data.notes else None)
     db.add(review)
+
+    notification_details = {
+        "APPROVE": ("JOURNAL_APPROVED", "Jurnal disetujui", "Jurnal kelas ini telah disetujui oleh guru piket."),
+        "REQUEST_REVISION": ("REVISION_REQUESTED", "Jurnal perlu diperbaiki", "Guru piket meminta perbaikan pada jurnal ini."),
+        "REJECT": ("JOURNAL_REJECTED", "Jurnal ditolak", "Jurnal kelas ini ditolak oleh guru piket."),
+    }
+    notification_type, notification_title, notification_message = notification_details[data.decision]
+    if data.notes:
+        notification_message += f" Catatan: {data.notes.strip()}"
+    add_notification(
+        db, journal.officer_user_id, journal.id, notification_type,
+        notification_title, notification_message,
+    )
+
     db.commit()
     db.refresh(review)
     return JournalReviewResponse(id=review.id, journal_id=review.journal_id, reviewer_user_id=review.reviewer_user_id, reviewer_name=reviewer.full_name, decision=review.decision, notes=review.notes, reviewed_at=review.reviewed_at)
@@ -1558,6 +1619,48 @@ def get_journal_reviews(journal_id: int, db: Session = Depends(get_db)):
         reviewer = db.query(User).filter(User.id == review.reviewer_user_id).first()
         results.append(JournalReviewResponse(id=review.id, journal_id=review.journal_id, reviewer_user_id=review.reviewer_user_id, reviewer_name=reviewer.full_name, decision=review.decision, notes=review.notes, reviewed_at=review.reviewed_at))
     return results
+
+
+@app.get(
+    "/notifications",
+    response_model=list[NotificationResponse],
+    tags=["Notifications"],
+)
+def get_notifications(
+    user_id: int,
+    unread_only: bool = False,
+    db: Session = Depends(get_db),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan atau tidak aktif.")
+
+    query = db.query(Notification).filter(Notification.recipient_user_id == user_id)
+    if unread_only:
+        query = query.filter(Notification.is_read.is_(False))
+    return query.order_by(Notification.created_at.desc(), Notification.id.desc()).all()
+
+
+@app.put(
+    "/notifications/{notification_id}/read",
+    response_model=NotificationResponse,
+    tags=["Notifications"],
+)
+def mark_notification_as_read(
+    notification_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+):
+    notification = db.query(Notification).filter(Notification.id == notification_id).first()
+    if notification is None:
+        raise HTTPException(status_code=404, detail="Notifikasi tidak ditemukan.")
+    if notification.recipient_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Notifikasi ini bukan milik pengguna tersebut.")
+    notification.is_read = True
+    db.commit()
+    db.refresh(notification)
+    return notification
+
 
 
 @app.get(

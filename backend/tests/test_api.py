@@ -1118,6 +1118,8 @@ def test_review_inbox_and_approve_journal(client):
     assert reviewed.status_code == 201
     assert reviewed.json()["decision"] == "APPROVE"
     assert client.get(f"/journals/{session['journal_id']}").json()["status"] == "APPROVED"
+    officer_notifications = client.get("/notifications?user_id=1").json()
+    assert officer_notifications[0]["notification_type"] == "JOURNAL_APPROVED"
     history = client.get(f"/journals/{session['journal_id']}/reviews")
     assert history.status_code == 200
     assert len(history.json()) == 1
@@ -1200,6 +1202,8 @@ def test_journal_revision_cycle_and_resubmission(client):
     resubmitted = client.post(f"/journals/{journal_id}/submit", json={"officer_user_id": 1})
     assert resubmitted.status_code == 200
     assert resubmitted.json()["status"] == "RESUBMITTED"
+    teacher_notifications = client.get(f"/notifications?user_id={teacher['id']}").json()
+    assert any(item["notification_type"] == "JOURNAL_RESUBMITTED" for item in teacher_notifications)
     assert any(item["id"] == journal_id for item in client.get("/reviews/inbox").json())
     assert len(client.get(f"/journals/{journal_id}/reviews").json()) == 1
 
@@ -1474,3 +1478,117 @@ def test_absence_report_rejects_missing_journal_and_wrong_slot(client):
         "slot_id": other_slot["id"], "officer_user_id": journal["officer_user_id"],
     })
     assert wrong_class.status_code == 404
+
+
+
+def test_journal_submission_notifies_duty_teacher(client):
+    session, teacher = submit_ready_journal(client)
+
+    response = client.get(f"/notifications?user_id={teacher['id']}")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    notification = response.json()[0]
+    assert notification["journal_id"] == session["journal_id"]
+    assert notification["notification_type"] == "JOURNAL_SUBMITTED"
+    assert notification["is_read"] is False
+
+
+def test_journal_review_notifies_class_officer(client):
+    session, teacher = submit_ready_journal(client)
+    reviewed = client.post(f"/journals/{session['journal_id']}/review", json={
+        "reviewer_user_id": teacher["id"],
+        "decision": "REQUEST_REVISION",
+        "notes": "Mohon lengkapi materi.",
+    })
+    assert reviewed.status_code == 201
+
+    response = client.get("/notifications?user_id=1&unread_only=true")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    notification = response.json()[0]
+    assert notification["notification_type"] == "REVISION_REQUESTED"
+    assert "Mohon lengkapi materi." in notification["message"]
+
+
+def test_notification_can_be_marked_read_only_by_recipient(client):
+    session, teacher = submit_ready_journal(client)
+    notification = client.get(f"/notifications?user_id={teacher['id']}").json()[0]
+    other_user = create_user(client, "guru_lain", role="teacher").json()
+
+    forbidden = client.put(
+        f"/notifications/{notification['id']}/read?user_id={other_user['id']}"
+    )
+    marked = client.put(
+        f"/notifications/{notification['id']}/read?user_id={teacher['id']}"
+    )
+    unread = client.get(f"/notifications?user_id={teacher['id']}&unread_only=true")
+    all_notifications = client.get(f"/notifications?user_id={teacher['id']}")
+
+    assert forbidden.status_code == 403
+    assert marked.status_code == 200
+    assert marked.json()["is_read"] is True
+    assert unread.json() == []
+    assert all_notifications.json()[0]["is_read"] is True
+
+
+def test_notification_list_rejects_unknown_user(client):
+    response = client.get("/notifications?user_id=999")
+    assert response.status_code == 404
+
+
+
+def test_another_active_teacher_can_create_session_after_absence_report(client):
+    journal, scheduled_teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
+    actual_teacher = create_user(client, "guru_pengajar_pengganti", role="teacher").json()
+
+    report = client.post(f"/journals/{journal['id']}/absence-reports", json={
+        "slot_id": slot_ids[0],
+        "officer_user_id": 1,
+        "notes": "Guru terjadwal tidak hadir.",
+    })
+    session = client.post(f"/journals/{journal['id']}/sessions", json={
+        "slot_ids": [slot_ids[0]],
+        "teacher_id": actual_teacher["id"],
+        "material": "Materi yang diajarkan guru pengganti",
+        "actual_start_time": "08:35",
+        "actual_end_time": "09:10",
+    })
+
+    assert report.status_code == 201
+    assert session.status_code == 201
+    assert session.json()["teacher_id"] == actual_teacher["id"]
+    assert session.json()["teacher_name"] == actual_teacher["full_name"]
+
+
+def test_another_teacher_still_needs_absence_report(client):
+    journal, scheduled_teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
+    actual_teacher = create_user(client, "guru_lain", role="teacher").json()
+
+    response = client.post(f"/journals/{journal['id']}/sessions", json={
+        "slot_ids": [slot_ids[0]],
+        "teacher_id": actual_teacher["id"],
+        "material": "Materi",
+        "actual_start_time": "08:35",
+        "actual_end_time": "09:10",
+    })
+
+    assert response.status_code == 400
+    assert "laporan ketidakhadiran" in response.json()["detail"].lower()
+
+
+
+def test_rejecting_journal_notifies_class_officer(client):
+    session, teacher = submit_ready_journal(client)
+    reviewed = client.post(f"/journals/{session['journal_id']}/review", json={
+        "reviewer_user_id": teacher["id"],
+        "decision": "REJECT",
+        "notes": "Data jurnal tidak sesuai.",
+    })
+
+    notifications = client.get("/notifications?user_id=1").json()
+
+    assert reviewed.status_code == 201
+    assert notifications[0]["notification_type"] == "JOURNAL_REJECTED"
+    assert "Data jurnal tidak sesuai." in notifications[0]["message"]

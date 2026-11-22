@@ -225,3 +225,16 @@ class TeacherAbsenceReport(Base):
     reported_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     reported_at: Mapped[object] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    recipient_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    journal_id: Mapped[int] = mapped_column(ForeignKey("daily_journals.id"), nullable=False)
+    notification_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime, server_default=func.now(), nullable=False)

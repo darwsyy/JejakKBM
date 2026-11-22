@@ -1082,3 +1082,27 @@ kosong sebagai slot khusus. Semua tindakan penting harus memiliki audit
 trail. Implementasikan bertahap berdasarkan task list; jangan mengarang
 kebijakan yang belum diputuskan; jangan menandai fitur selesai sebelum
 diuji.
+
+
+---
+
+# 16. Keputusan dan Implementasi Terbaru (2026-11-23)
+
+Bagian ini memperbarui ketentuan lama yang masih menyebut proses penugasan dan konfirmasi guru pengganti.
+
+## Guru mengambil alih sesi
+
+- Tidak dibuat tabel `substitute_assignments`, endpoint penugasan guru pengganti, atau proses konfirmasi khusus.
+- Petugas kelas cukup membuat laporan ketidakhadiran guru terjadwal pada JP terkait.
+- Jika guru lain mengambil alih pembelajaran, guru tersebut menggunakan akun sendiri untuk membuat sesi.
+- Backend mengizinkan guru aktif yang berbeda dari guru terjadwal hanya jika laporan ketidakhadiran tersedia untuk setiap JP yang dipilih dalam sesi.
+- `teacher_id` pada sesi dan catatan absensi harus menunjukkan guru yang benar-benar mengajar.
+- Hanya guru pengajar yang tercatat pada sesi yang dapat mengisi atau memperbaiki absensi sesi tersebut.
+
+## Notifikasi dalam aplikasi
+
+- Jurnal dikirim atau dikirim ulang: notifikasi diberikan kepada guru piket yang terdaftar pada tanggal jurnal.
+- Jurnal diminta revisi, disetujui, atau ditolak: notifikasi diberikan kepada petugas kelas pemilik jurnal.
+- Notifikasi memiliki status sudah/belum dibaca dan disimpan di database.
+- Push notification HP belum termasuk implementasi backend ini.
+- Selama login belum dibuat, endpoint notifikasi menggunakan `user_id` sebagai identitas sementara untuk pengembangan lokal.

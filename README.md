@@ -97,6 +97,9 @@ Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 | PUT | /schedule-slots/{slot_id}/subject/{subject_id} | Menetapkan atau mengganti mata pelajaran |
 | GET | /schedule-slots/{slot_id}/subject | Melihat mata pelajaran pada slot |
 | DELETE | /schedule-slots/{slot_id}/subject | Menghapus penugasan mata pelajaran |
+| GET | /notifications?user_id=1 | Melihat notifikasi milik pengguna |
+| GET | /notifications?user_id=1&unread_only=true | Melihat notifikasi yang belum dibaca |
+| PUT | /notifications/{notification_id}/read?user_id=1 | Menandai notifikasi sudah dibaca |
 
 ## Menjalankan tes
 
@@ -119,7 +122,7 @@ python -m pytest -q
 - Profil guru terhubung ke satu akun dengan role teacher. NIP bersifat opsional dan unik jika diisi.
 - Riwayat petugas jurnal disimpan per periode tanggal. Periode untuk kelas yang sama tidak boleh bertumpang tindih; `end_date` boleh kosong untuk penugasan yang masih berjalan.
 - Satu kelas hanya memiliki satu jurnal per tanggal. Pembuatan jurnal memeriksa periode petugas dan aman diulang tanpa membuat jurnal duplikat. Jurnal baru berstatus `DRAFT`.
-- Sesi pembelajaran hanya memakai slot `LESSON` yang berurutan pada hari jurnal, dengan mata pelajaran dan guru jadwal yang sama. Waktu aktual serta materi dicatat pada sesi.
+- Sesi pembelajaran hanya memakai slot `LESSON` yang berurutan pada hari jurnal dan memiliki mata pelajaran yang sama. Biasanya guru sesi harus sama dengan guru terjadwal. Jika guru terjadwal tidak hadir, guru aktif lain boleh mengisi sesi setelah petugas kelas membuat laporan ketidakhadiran untuk setiap JP yang diambil alih. Data sesi dan absensi mencatat akun guru yang benar-benar mengajar. Waktu aktual serta materi dicatat pada sesi.
 - Absensi disimpan per siswa dan per JP. Hanya guru pengajar sesi yang dapat mengisi; siswa harus berasal dari kelas jurnal. Status sementara: `PRESENT`, `SICK`, `PERMITTED`, `ABSENT`.
 
 
@@ -186,3 +189,14 @@ python -m pytest -q
 - Satu JP hanya dapat memiliki satu laporan ketidakhadiran pada jurnal yang sama.
 - `GET /journals/{journal_id}/absence-reports` menampilkan semua laporan untuk jurnal tersebut.
 - Identitas pelapor saat ini masih dikirim melalui ID karena fitur login belum dibuat.
+
+
+### Notifikasi dalam aplikasi
+
+- Saat jurnal dikirim, semua guru yang terdaftar sebagai guru piket pada tanggal jurnal menerima notifikasi.
+- Saat jurnal diminta revisi, petugas kelas menerima notifikasi beserta catatan guru piket.
+- Saat jurnal disetujui atau ditolak, petugas kelas menerima notifikasi hasil pemeriksaan.
+- `GET /notifications?user_id=1` menampilkan notifikasi pengguna. Tambahkan `&unread_only=true` untuk hanya melihat yang belum dibaca.
+- `PUT /notifications/{notification_id}/read?user_id=1` menandai notifikasi sebagai sudah dibaca. Hanya penerima yang boleh mengubah status baca.
+- Notifikasi disimpan di database lokal. Push notification ke HP belum dibuat karena aplikasi mobile belum tersedia.
+- `user_id` masih dikirim melalui URL karena login belum dibuat; pembatasan ini hanya untuk pengembangan lokal.

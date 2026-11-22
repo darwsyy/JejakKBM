@@ -387,3 +387,19 @@ class TeacherAbsenceReportResponse(BaseModel):
     officer_name: str
     notes: str | None
     reported_at: datetime
+
+
+class NotificationResponse(BaseModel):
+    id: int
+    recipient_user_id: int
+    journal_id: int
+    notification_type: Literal[
+        "JOURNAL_SUBMITTED", "JOURNAL_RESUBMITTED",
+        "REVISION_REQUESTED", "JOURNAL_APPROVED", "JOURNAL_REJECTED",
+    ]
+    title: str
+    message: str
+    is_read: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
