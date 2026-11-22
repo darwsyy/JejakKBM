@@ -267,3 +267,7 @@ class AttendanceCompletenessResponse(BaseModel):
     recorded_count: int
     missing_count: int
     missing_students: list[dict]
+
+
+class JournalSubmitRequest(BaseModel):
+    officer_user_id: int = Field(ge=1)

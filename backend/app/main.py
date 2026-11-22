@@ -13,6 +13,7 @@ from app.schemas import (
     ClassOfficerResponse,
     DailyJournalCreate,
     DailyJournalResponse,
+    JournalSubmitRequest,
     JournalSessionCreate,
     JournalSessionResponse,
     AttendanceCreate,
@@ -1273,3 +1274,87 @@ def get_attendance_completeness(
             missing_count=len(missing), missing_students=missing,
         ))
     return results
+
+
+@app.post(
+    "/journals/{journal_id}/submit",
+    response_model=DailyJournalResponse,
+    tags=["Daily Journals"],
+)
+def submit_daily_journal(
+    journal_id: int,
+    data: JournalSubmitRequest,
+    db: Session = Depends(get_db),
+):
+    journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
+    if journal is None:
+        raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
+    if journal.status != "DRAFT":
+        raise HTTPException(status_code=400, detail="Hanya jurnal DRAFT yang dapat dikirim.")
+    if data.officer_user_id != journal.officer_user_id:
+        raise HTTPException(status_code=403, detail="Hanya petugas jurnal yang ditetapkan yang dapat mengirim.")
+
+    officer_period = db.query(ClassOfficerPeriod).filter(
+        ClassOfficerPeriod.class_id == journal.class_id,
+        ClassOfficerPeriod.user_id == data.officer_user_id,
+        ClassOfficerPeriod.start_date <= journal.journal_date,
+    ).filter(
+        (ClassOfficerPeriod.end_date.is_(None))
+        | (ClassOfficerPeriod.end_date >= journal.journal_date)
+    ).first()
+    if officer_period is None:
+        raise HTTPException(status_code=403, detail="Petugas tidak terdaftar pada tanggal jurnal.")
+
+    expected_slots = db.query(ScheduleSlot).filter(
+        ScheduleSlot.class_id == journal.class_id,
+        ScheduleSlot.day_of_week == journal.journal_date.strftime("%A"),
+        ScheduleSlot.slot_type == "LESSON",
+        ScheduleSlot.jp_number.is_not(None),
+    ).all()
+    sessions = db.query(JournalSession).filter(JournalSession.journal_id == journal_id).all()
+    session_slot_ids = set()
+    for session in sessions:
+        links = db.query(JournalSessionSlot).filter(
+            JournalSessionSlot.session_id == session.id
+        ).all()
+        session_slot_ids.update(link.slot_id for link in links)
+
+    expected_slot_ids = {slot.id for slot in expected_slots}
+    missing_sessions = expected_slot_ids - session_slot_ids
+    if missing_sessions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Masih ada {len(missing_sessions)} JP pelajaran yang belum dicatat dalam sesi.",
+        )
+
+    active_students = db.query(Student).filter(
+        Student.class_id == journal.class_id,
+        Student.is_active.is_(True),
+    ).all()
+    for session in sessions:
+        links = db.query(JournalSessionSlot).filter(
+            JournalSessionSlot.session_id == session.id
+        ).all()
+        for link in links:
+            attendance_ids = {
+                row.student_id for row in db.query(AttendanceRecord).filter(
+                    AttendanceRecord.session_id == session.id,
+                    AttendanceRecord.slot_id == link.slot_id,
+                ).all()
+            }
+            missing_count = sum(
+                1 for student in active_students if student.id not in attendance_ids
+            )
+            if missing_count:
+                slot = db.query(ScheduleSlot).filter(
+                    ScheduleSlot.id == link.slot_id
+                ).first()
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Absensi JP {slot.jp_number} belum lengkap: {missing_count} siswa belum dicatat.",
+                )
+
+    journal.status = "SUBMITTED"
+    db.commit()
+    db.refresh(journal)
+    return journal

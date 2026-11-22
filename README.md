@@ -127,3 +127,11 @@ python -m pytest -q
 
 - `POST /journal-sessions/{session_id}/attendance/batch` menerima satu `slot_id`, `teacher_id`, dan daftar `records` berisi `student_id` serta `attendance_status`. Semua siswa divalidasi sebelum disimpan; jika satu data tidak valid, tidak ada catatan yang disimpan.
 - `GET /journal-sessions/{session_id}/attendance/completeness` menampilkan jumlah siswa aktif, jumlah yang sudah dicatat, dan daftar yang belum dicatat untuk setiap JP. Tambahkan query `slot_id` untuk memeriksa satu JP saja.
+
+
+### Pengiriman jurnal harian
+
+- `POST /journals/{journal_id}/submit` menerima `officer_user_id` untuk mengirim jurnal oleh petugas kelas yang ditetapkan.
+- Pengiriman hanya berhasil jika jurnal masih `DRAFT`, seluruh slot jadwal bertipe `LESSON` pada hari tersebut sudah masuk ke sesi pembelajaran, dan semua siswa aktif memiliki catatan absensi pada setiap JP dalam sesi.
+- Slot khusus seperti `BREAK`, `ASSEMBLY`, `COCURRICULAR`, dan `FREE` tidak memerlukan sesi pembelajaran.
+- Jika pemeriksaan berhasil, status jurnal berubah menjadi `SUBMITTED`. Status ini berarti jurnal sudah dikirim dan tidak perlu menunggu pemeriksaan guru piket untuk dihitung sebagai terkirim.

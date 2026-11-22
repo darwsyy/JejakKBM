@@ -1027,3 +1027,59 @@ def test_attendance_completeness_rejects_unknown_session_or_jp(client):
         f"/journal-sessions/{session['id']}/attendance/completeness?slot_id=999"
     )
     assert response.status_code == 400
+
+
+
+def test_journal_submit_rejects_missing_lesson_sessions(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    officer = create_user(client, "petugas_submit").json()
+    create_officer_period(client, classroom["id"], officer["id"])
+    journal = client.post("/journals", json={
+        "class_id": classroom["id"], "journal_date": "2026-11-23",
+        "officer_user_id": officer["id"],
+    }).json()
+    client.post(f"/classes/{classroom['id']}/schedule-slots", json={
+        "day_of_week": "Monday", "slot_order": 1, "jp_number": 1,
+        "start_time": "07:00", "end_time": "07:45", "slot_type": "LESSON",
+    })
+    response = client.post(f"/journals/{journal['id']}/submit", json={
+        "officer_user_id": officer["id"],
+    })
+    assert response.status_code == 400
+    assert "JP pelajaran" in response.json()["detail"]
+
+
+def test_journal_submit_rejects_incomplete_attendance(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    response = client.post(f"/journals/{session['journal_id']}/submit", json={
+        "officer_user_id": 1,
+    })
+    assert response.status_code == 400
+    assert "absensi" in response.json()["detail"].lower()
+
+
+def test_journal_submit_succeeds_when_all_lessons_and_attendance_complete(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    for slot_id in slot_ids:
+        client.post(f"/journal-sessions/{session['id']}/attendance", json={
+            "slot_id": slot_id, "student_id": student["id"],
+            "teacher_id": teacher["id"], "attendance_status": "PRESENT",
+        })
+    submitted = client.post(f"/journals/{session['journal_id']}/submit", json={
+        "officer_user_id": 1,
+    })
+    assert submitted.status_code == 200
+    assert submitted.json()["status"] == "SUBMITTED"
+    assert client.get(f"/journals/{session['journal_id']}").json()["status"] == "SUBMITTED"
+    repeated = client.post(f"/journals/{session['journal_id']}/submit", json={
+        "officer_user_id": 1,
+    })
+    assert repeated.status_code == 400
+
+
+def test_journal_submit_rejects_wrong_officer_and_repeat_submission(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    wrong = client.post(f"/journals/{session['journal_id']}/submit", json={
+        "officer_user_id": 999,
+    })
+    assert wrong.status_code == 403
