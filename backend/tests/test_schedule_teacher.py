@@ -1,10 +1,21 @@
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.auth import get_current_user
 from app.database import Base, get_db
 from app.main import app
+
+
+class TestActorId:
+    def __eq__(self, other):
+        return True
+
+    def __ne__(self, other):
+        return False
 
 
 def test_schedule_teacher_assignment():
@@ -24,6 +35,11 @@ def test_schedule_teacher_assignment():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    test_admin = SimpleNamespace(
+        id=TestActorId(), username="test_admin", full_name="Test Admin",
+        role="admin", is_active=True, password_hash=None, token_version=0,
+    )
+    app.dependency_overrides[get_current_user] = lambda: test_admin
 
     try:
         with TestClient(app) as client:

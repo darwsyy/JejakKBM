@@ -4,7 +4,7 @@ Sistem jurnal Kegiatan Belajar Mengajar (KBM) digital.
 
 ## Status proyek
 
-Tahap awal: backend API dan database lokal. Fitur login, jurnal KBM, absensi, aplikasi Android, dan dashboard admin akan dibuat bertahap.
+Tahap backend: API jurnal KBM, absensi, autentikasi, notifikasi, audit log, dan database lokal. GUI Android belum dibuat.
 
 ## Teknologi
 
@@ -46,7 +46,7 @@ Setelah database disiapkan, jalankan:
 python backend/seed_demo.py
 ```
 
-Perintah ini membuat akun demo (`demo_admin`, `demo_guru`, `demo_petugas`), kelas, satu siswa, mata pelajaran, dan jadwal contoh. Aman dijalankan berulang kali karena data yang sudah ada tidak dibuat ulang. Belum ada password karena fitur login belum dibuat. Gunakan hanya untuk database latihan, bukan data sekolah sungguhan.
+Perintah ini membuat akun demo (`demo_admin`, `demo_guru`, `demo_petugas`), kelas, satu siswa, mata pelajaran, dan jadwal contoh. Aman dijalankan berulang kali karena data yang sudah ada tidak dibuat ulang. Akun demo belum memiliki password; admin perlu mengatur password akun melalui endpoint admin. Gunakan hanya untuk database latihan, bukan data sekolah sungguhan.
 
 ## Menjalankan API
 
@@ -61,6 +61,13 @@ Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 | Method | Alamat | Fungsi |
 |---|---|---|
 | GET | /health | Memeriksa API |
+| POST | /auth/bootstrap | Membuat admin pertama |
+| POST | /auth/login | Login dan memperoleh token |
+| GET | /auth/me | Melihat akun yang sedang login |
+| POST | /auth/change-password | Mengubah password akun sendiri |
+| POST | /auth/logout | Membatalkan token saat ini |
+| PUT | /users/{user_id}/password | Admin menetapkan password akun |
+| GET | /audit-logs | Admin melihat riwayat tindakan penting |
 | POST | /users | Menambah pengguna |
 | GET | /users | Melihat pengguna |
 | POST | /classes | Menambah kelas |
@@ -107,9 +114,37 @@ Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 python -m pytest -q
 ```
 
+## Login pertama kali
+
+1. Siapkan database dan jalankan API.
+2. Sebelum menjalankan API, atur secret token di PowerShell:
+
+```powershell
+$env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
+```
+
+3. Buka `/docs`, lalu gunakan `POST /auth/bootstrap` untuk membuat admin pertama. Contoh JSON:
+
+```json
+{
+  "username": "admin_sekolah",
+  "full_name": "Administrator Sekolah",
+  "password": "password-kuat-minimal-8"
+}
+```
+
+4. Login melalui `POST /auth/login`. Gunakan access token yang diterima pada tombol **Authorize** di dokumentasi API.
+5. Admin dapat membuat akun melalui `POST /users`, lalu menetapkan password melalui `PUT /users/{user_id}/password` dengan JSON `{ "password": "password-kuat" }`.
+6. Akun dapat melihat identitas sendiri melalui `/auth/me`, mengganti password melalui `/auth/change-password`, dan keluar melalui `/auth/logout`.
+
+`/auth/bootstrap`, `/auth/login`, dan `/health` tidak membutuhkan token. Endpoint lainnya memerlukan Bearer token. Operasi pengelolaan data utama dibatasi untuk admin. Tindakan yang membawa ID pelaku juga memeriksa agar ID tersebut sama dengan akun yang sedang login.
+
 ## Catatan
 
-- Saat ini belum ada login atau pembatasan akses. Endpoint hanya untuk pengembangan lokal.
+- Secret default di kode hanya untuk pengembangan lokal. Untuk penggunaan sekolah, selalu atur `JEJAKKBM_SECRET_KEY` sendiri dan jangan membagikannya.
+- Password disimpan menggunakan PBKDF2-HMAC-SHA256. Token berlaku 8 jam; logout dan penggantian password membatalkan token lama.
+- `POST /auth/bootstrap` hanya dapat berhasil sebelum admin ber-password pertama dibuat.
+- Audit log mencatat pembuatan jurnal, sesi, absensi, pengiriman, review, revisi, laporan guru tidak hadir, dan penugasan piket. Hanya admin yang dapat membaca audit log.
 - Data demo dapat dibuat dengan `python backend/seed_demo.py`; gunakan hanya pada database latihan.
 - File database lokal tidak dimasukkan ke Git.
 - Jangan gunakan data pribadi siswa sungguhan untuk pengujian.
@@ -162,7 +197,7 @@ python -m pytest -q
 - `GET /duty-rosters` menampilkan semua penugasan; gunakan `?duty_date=YYYY-MM-DD` untuk satu tanggal.
 - `DELETE /duty-rosters/{roster_id}?admin_user_id=1` menghapus penugasan dengan persetujuan akun admin aktif.
 - Seorang guru boleh mendapat beberapa tanggal piket, dan satu tanggal boleh memiliki beberapa guru piket. Guru yang memeriksa jurnal harus terdaftar pada tanggal jurnal tersebut.
-- Karena login belum dibuat, ID admin dan guru masih dikirim dalam request; ini validasi role sementara untuk pengembangan lokal.
+- Request masih membawa ID pelaku untuk menghubungkan tindakan dengan data, tetapi backend memeriksa bahwa ID tersebut sama dengan identitas dari Bearer token.
 
 
 ### Dashboard ringkasan harian

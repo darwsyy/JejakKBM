@@ -1,11 +1,30 @@
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.auth import get_current_user
 from app.database import Base, get_db
 from app.main import app
+
+
+class TestActorId:
+    def __eq__(self, other):
+        return True
+
+    def __ne__(self, other):
+        return False
+
+
+class TestActorRole:
+    def __eq__(self, other):
+        return True
+
+    def __ne__(self, other):
+        return False
 
 
 @pytest.fixture
@@ -30,6 +49,12 @@ def client():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    # Dependency actor dibuat fleksibel untuk tes alur bisnis.
+    test_admin = SimpleNamespace(
+        id=TestActorId(), username="test_admin", full_name="Test Admin",
+        role=TestActorRole(), is_active=True, password_hash=None, token_version=0,
+    )
+    app.dependency_overrides[get_current_user] = lambda: test_admin
 
     with TestClient(app) as test_client:
         yield test_client
@@ -1592,3 +1617,274 @@ def test_rejecting_journal_notifies_class_officer(client):
     assert reviewed.status_code == 201
     assert notifications[0]["notification_type"] == "JOURNAL_REJECTED"
     assert "Data jurnal tidak sesuai." in notifications[0]["message"]
+
+
+
+def test_admin_bootstrap_login_and_current_user(client):
+    bootstrap = client.post("/auth/bootstrap", json={
+        "username": "admin_utama",
+        "full_name": "Administrator Utama",
+        "password": "password-kuat-123",
+    })
+    second_bootstrap = client.post("/auth/bootstrap", json={
+        "username": "admin_kedua",
+        "full_name": "Admin Kedua",
+        "password": "password-kuat-123",
+    })
+    wrong_login = client.post("/auth/login", json={
+        "username": "admin_utama",
+        "password": "password-salah",
+    })
+    login = client.post("/auth/login", json={
+        "username": "admin_utama",
+        "password": "password-kuat-123",
+    })
+
+    assert bootstrap.status_code == 201
+    assert second_bootstrap.status_code == 409
+    assert wrong_login.status_code == 401
+    assert login.status_code == 200
+    assert "password_hash" not in bootstrap.json()
+
+    app.dependency_overrides.pop(get_current_user, None)
+    me = client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+    )
+    assert me.status_code == 200
+    assert me.json()["username"] == "admin_utama"
+
+
+def test_password_change_invalidates_old_token(client):
+    client.post("/auth/bootstrap", json={
+        "username": "admin_ganti",
+        "full_name": "Admin Ganti",
+        "password": "password-lama-123",
+    })
+    login = client.post("/auth/login", json={
+        "username": "admin_ganti",
+        "password": "password-lama-123",
+    })
+    old_token = login.json()["access_token"]
+    app.dependency_overrides.pop(get_current_user, None)
+
+    changed = client.post(
+        "/auth/change-password",
+        json={
+            "old_password": "password-lama-123",
+            "new_password": "password-baru-123",
+        },
+        headers={"Authorization": f"Bearer {old_token}"},
+    )
+    old_token_check = client.get(
+        "/auth/me", headers={"Authorization": f"Bearer {old_token}"}
+    )
+    new_login = client.post("/auth/login", json={
+        "username": "admin_ganti",
+        "password": "password-baru-123",
+    })
+
+    assert changed.status_code == 200
+    assert old_token_check.status_code == 401
+    assert new_login.status_code == 200
+
+
+def test_logout_invalidates_current_token(client):
+    client.post("/auth/bootstrap", json={
+        "username": "admin_logout",
+        "full_name": "Admin Logout",
+        "password": "password-kuat-123",
+    })
+    login = client.post("/auth/login", json={
+        "username": "admin_logout",
+        "password": "password-kuat-123",
+    })
+    token = login.json()["access_token"]
+    app.dependency_overrides.pop(get_current_user, None)
+
+    logout_response = client.post(
+        "/auth/logout", headers={"Authorization": f"Bearer {token}"}
+    )
+    me = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert logout_response.status_code == 200
+    assert me.status_code == 401
+
+
+def test_admin_can_set_password_for_new_user(client):
+    admin = client.post("/auth/bootstrap", json={
+        "username": "admin_password",
+        "full_name": "Admin Password",
+        "password": "password-admin-123",
+    })
+    user = create_user(client, "guru_baru", role="teacher")
+
+    response = client.put(
+        f"/users/{user.json()['id']}/password",
+        json={"password": "password-guru-123"},
+    )
+    login = client.post("/auth/login", json={
+        "username": "guru_baru",
+        "password": "password-guru-123",
+    })
+
+    assert admin.status_code == 201
+    assert response.status_code == 200
+    assert login.status_code == 200
+
+
+def test_protected_api_requires_login_and_admin_role(client):
+    app.dependency_overrides.pop(get_current_user, None)
+    unauthenticated = client.get("/users")
+    test_admin = SimpleNamespace(
+        id=TestActorId(), username="test_admin", full_name="Test Admin",
+        role="admin", is_active=True, password_hash=None, token_version=0,
+    )
+    app.dependency_overrides[get_current_user] = lambda: test_admin
+    client.post("/auth/bootstrap", json={
+        "username": "admin_access",
+        "full_name": "Admin Access",
+        "password": "password-admin-123",
+    })
+    user = create_user(client, "guru_access", role="teacher")
+    client.put(
+        f"/users/{user.json()['id']}/password",
+        json={"password": "password-guru-123"},
+    )
+    teacher_login = client.post("/auth/login", json={
+        "username": "guru_access",
+        "password": "password-guru-123",
+    })
+    app.dependency_overrides.pop(get_current_user, None)
+    headers = {"Authorization": f"Bearer {teacher_login.json()['access_token']}"}
+
+    forbidden = client.post(
+        "/classes",
+        json={"name": "X TKJ 1", "academic_year": "2026/2027"},
+        headers=headers,
+    )
+    allowed_read = client.get("/classes", headers=headers)
+
+    assert unauthenticated.status_code == 401
+    assert forbidden.status_code == 403
+    assert allowed_read.status_code == 200
+
+
+
+def test_journal_actions_are_saved_in_audit_log(client):
+    session, teacher = submit_ready_journal(client)
+    journal_id = session["journal_id"]
+
+    response = client.get(f"/audit-logs?journal_id={journal_id}&limit=200")
+    actions = {item["action"] for item in response.json()}
+
+    assert response.status_code == 200
+    assert "JOURNAL_CREATED" in actions
+    assert "SESSION_CREATED" in actions
+    assert "ATTENDANCE_RECORDED" in actions
+    assert "JOURNAL_SUBMITTED" in actions
+
+
+def test_audit_log_limit_is_validated(client):
+    response = client.get("/audit-logs?limit=201")
+    assert response.status_code == 422
+
+
+def test_logged_in_user_cannot_act_as_another_user(client):
+    client.post("/auth/bootstrap", json={
+        "username": "admin_identity",
+        "full_name": "Admin Identity",
+        "password": "password-admin-123",
+    })
+    classroom = create_classroom(client, "X TKJ Identity").json()
+    officer = create_user(client, "petugas_identity", role="class_officer").json()
+    client.put(
+        f"/users/{officer['id']}/password",
+        json={"password": "password-petugas-123"},
+    )
+    client.post(f"/classes/{classroom['id']}/officer-periods", json={
+        "user_id": officer["id"],
+        "start_date": "2026-11-23",
+        "end_date": None,
+    })
+    admin_login = client.post("/auth/login", json={
+        "username": "admin_identity",
+        "password": "password-admin-123",
+    })
+    officer_login = client.post("/auth/login", json={
+        "username": "petugas_identity",
+        "password": "password-petugas-123",
+    })
+    app.dependency_overrides.pop(get_current_user, None)
+
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+    officer_headers = {"Authorization": f"Bearer {officer_login.json()['access_token']}"}
+    payload = {
+        "class_id": classroom["id"],
+        "journal_date": "2026-11-23",
+        "officer_user_id": officer["id"],
+    }
+    impersonation = client.post("/journals", json=payload, headers=admin_headers)
+    created = client.post("/journals", json=payload, headers=officer_headers)
+
+    assert impersonation.status_code == 403
+    assert created.status_code == 201
+
+
+
+def test_daily_schedule_shows_slots_and_actual_teacher(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+
+    response = client.get(
+        f"/classes/1/daily-schedule?on_date=2026-11-23"
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["class_name"] == "X TKJ 1"
+    assert result["journal_id"] == session["journal_id"]
+    assert len(result["slots"]) == 2
+    first_slot = next(item for item in result["slots"] if item["slot_id"] == slot_ids[0])
+    assert first_slot["session_id"] == session["id"]
+    assert first_slot["actual_teacher_id"] == teacher["id"]
+
+
+def test_attendance_report_and_csv_export(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    first = client.post(f"/journal-sessions/{session['id']}/attendance", json={
+        "slot_id": slot_ids[0],
+        "student_id": student["id"],
+        "teacher_id": teacher["id"],
+        "attendance_status": "PRESENT",
+    })
+    second = client.post(f"/journal-sessions/{session['id']}/attendance", json={
+        "slot_id": slot_ids[1],
+        "student_id": student["id"],
+        "teacher_id": teacher["id"],
+        "attendance_status": "SICK",
+    })
+
+    report = client.get(
+        "/reports/attendance?class_id=1&start_date=2026-11-23&end_date=2026-11-23"
+    )
+    csv_report = client.get(
+        "/reports/attendance.csv?class_id=1&start_date=2026-11-23&end_date=2026-11-23"
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert report.status_code == 200
+    assert report.json()["total_records"] == 2
+    assert report.json()["status_counts"]["PRESENT"] == 1
+    assert report.json()["status_counts"]["SICK"] == 1
+    assert report.json()["students"][0]["total"] == 2
+    assert csv_report.status_code == 200
+    assert "NIS,Nama Siswa,Hadir,Sakit,Izin,Alpa,Total" in csv_report.text
+    assert student["full_name"] in csv_report.text
+
+
+def test_attendance_report_rejects_invalid_date_range(client):
+    response = client.get(
+        "/reports/attendance?class_id=1&start_date=2026-11-24&end_date=2026-11-23"
+    )
+    assert response.status_code == 422

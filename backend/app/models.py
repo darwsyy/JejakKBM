@@ -11,6 +11,8 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(100), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    token_version: Mapped[int] = mapped_column(default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
@@ -225,6 +227,18 @@ class TeacherAbsenceReport(Base):
     reported_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     reported_at: Mapped[object] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    target_id: Mapped[int] = mapped_column(nullable=False)
+    details: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
 
 class Notification(Base):

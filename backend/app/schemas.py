@@ -403,3 +403,89 @@ class NotificationResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+
+class AdminBootstrap(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    full_name: str = Field(min_length=2, max_length=100)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserResponse
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class SetPasswordRequest(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
+
+
+class AuditLogResponse(BaseModel):
+    id: int
+    actor_user_id: int | None
+    actor_name: str | None
+    action: str
+    target_type: str
+    target_id: int
+    details: str
+    created_at: datetime
+
+
+
+class DailyScheduleSlotResponse(BaseModel):
+    slot_id: int
+    slot_order: int
+    jp_number: int | None
+    start_time: str
+    end_time: str
+    slot_type: str
+    subject_name: str | None
+    scheduled_teacher_id: int | None
+    scheduled_teacher_name: str | None
+    session_id: int | None
+    actual_teacher_id: int | None
+    actual_teacher_name: str | None
+
+
+class DailyScheduleResponse(BaseModel):
+    class_id: int
+    class_name: str
+    schedule_date: date
+    day_of_week: str
+    journal_id: int | None
+    journal_status: str
+    slots: list[DailyScheduleSlotResponse]
+
+
+class StudentAttendanceSummary(BaseModel):
+    student_id: int
+    nis: str
+    full_name: str
+    present: int
+    sick: int
+    permitted: int
+    absent: int
+    total: int
+
+
+class AttendanceReportResponse(BaseModel):
+    class_id: int
+    class_name: str
+    start_date: date
+    end_date: date
+    total_records: int
+    status_counts: dict[str, int]
+    students: list[StudentAttendanceSummary]
