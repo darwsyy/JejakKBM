@@ -176,3 +176,13 @@ python -m pytest -q
 - Gunakan `?report_date=YYYY-MM-DD` untuk memilih tanggal.
 - Respons berisi status jurnal (atau `MISSING` jika belum dibuat), daftar sesi, guru, mata pelajaran, JP, materi, waktu aktual, jumlah absensi per status, dan riwayat catatan pemeriksaan.
 - Jika jurnal belum ada, endpoint tetap mengembalikan ringkasan kosong agar dashboard dapat menampilkan kelas yang belum mengirim jurnal.
+
+
+### Laporan guru tidak hadir
+
+- `POST /journals/{journal_id}/absence-reports` mencatat guru terjadwal yang tidak hadir pada satu JP. Request berisi `slot_id`, `officer_user_id`, dan catatan opsional.
+- Hanya petugas kelas yang ditetapkan dan masih aktif pada tanggal jurnal yang dapat melapor.
+- Laporan hanya berlaku untuk slot `LESSON` yang memiliki guru terjadwal dan belum memiliki sesi pembelajaran.
+- Satu JP hanya dapat memiliki satu laporan ketidakhadiran pada jurnal yang sama.
+- `GET /journals/{journal_id}/absence-reports` menampilkan semua laporan untuk jurnal tersebut.
+- Identitas pelapor saat ini masih dikirim melalui ID karena fitur login belum dibuat.

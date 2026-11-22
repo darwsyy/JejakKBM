@@ -368,3 +368,22 @@ class ClassDashboardResponse(BaseModel):
     attendance_counts: dict[str, int]
     sessions: list[ClassDashboardSessionResponse]
     reviews: list[ClassDashboardReviewResponse]
+
+
+class TeacherAbsenceReportCreate(BaseModel):
+    slot_id: int = Field(ge=1)
+    officer_user_id: int = Field(ge=1)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class TeacherAbsenceReportResponse(BaseModel):
+    id: int
+    journal_id: int
+    slot_id: int
+    jp_number: int
+    scheduled_teacher_id: int
+    teacher_name: str
+    reported_by_user_id: int
+    officer_name: str
+    notes: str | None
+    reported_at: datetime
