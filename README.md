@@ -135,3 +135,11 @@ python -m pytest -q
 - Pengiriman hanya berhasil jika jurnal masih `DRAFT`, seluruh slot jadwal bertipe `LESSON` pada hari tersebut sudah masuk ke sesi pembelajaran, dan semua siswa aktif memiliki catatan absensi pada setiap JP dalam sesi.
 - Slot khusus seperti `BREAK`, `ASSEMBLY`, `COCURRICULAR`, dan `FREE` tidak memerlukan sesi pembelajaran.
 - Jika pemeriksaan berhasil, status jurnal berubah menjadi `SUBMITTED`. Status ini berarti jurnal sudah dikirim dan tidak perlu menunggu pemeriksaan guru piket untuk dihitung sebagai terkirim.
+
+
+### Pemeriksaan guru
+
+- `GET /reviews/inbox` menampilkan jurnal berstatus `SUBMITTED` atau `RESUBMITTED`.
+- `POST /journals/{journal_id}/review` menerima `reviewer_user_id`, `decision` (`APPROVE`, `REQUEST_REVISION`, atau `REJECT`), dan `notes`. Catatan wajib untuk revisi atau penolakan.
+- `GET /journals/{journal_id}/reviews` menampilkan riwayat pemeriksaan.
+- Keputusan mengubah status jurnal menjadi `APPROVED`, `REVISION_REQUIRED`, atau `REJECTED`. Saat ini pemeriksa divalidasi sebagai akun guru aktif; penugasan guru piket khusus dan alur edit/resubmit akan dibuat pada tahap berikutnya.

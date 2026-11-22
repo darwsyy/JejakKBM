@@ -187,3 +187,14 @@ class AttendanceRecord(Base):
     teacher_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     attendance_status: Mapped[str] = mapped_column(String(20), nullable=False)
     recorded_at: Mapped[object] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
+class JournalReview(Base):
+    __tablename__ = "journal_reviews"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    journal_id: Mapped[int] = mapped_column(ForeignKey("daily_journals.id"), nullable=False)
+    reviewer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    decision: Mapped[str] = mapped_column(String(30), nullable=False)
+    notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    reviewed_at: Mapped[object] = mapped_column(DateTime, server_default=func.now(), nullable=False)

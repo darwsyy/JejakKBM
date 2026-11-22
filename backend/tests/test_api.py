@@ -1083,3 +1083,65 @@ def test_journal_submit_rejects_wrong_officer_and_repeat_submission(client):
         "officer_user_id": 999,
     })
     assert wrong.status_code == 403
+
+
+
+def submit_ready_journal(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    for slot_id in slot_ids:
+        response = client.post(f"/journal-sessions/{session['id']}/attendance", json={
+            "slot_id": slot_id, "student_id": student["id"],
+            "teacher_id": teacher["id"], "attendance_status": "PRESENT",
+        })
+        assert response.status_code == 201
+    submitted = client.post(f"/journals/{session['journal_id']}/submit", json={"officer_user_id": 1})
+    assert submitted.status_code == 200
+    return session, teacher
+
+
+def test_review_inbox_and_approve_journal(client):
+    session, teacher = submit_ready_journal(client)
+    inbox = client.get("/reviews/inbox")
+    assert inbox.status_code == 200
+    assert any(item["id"] == session["journal_id"] for item in inbox.json())
+
+    reviewed = client.post(f"/journals/{session['journal_id']}/review", json={
+        "reviewer_user_id": teacher["id"], "decision": "APPROVE",
+    })
+    assert reviewed.status_code == 201
+    assert reviewed.json()["decision"] == "APPROVE"
+    assert client.get(f"/journals/{session['journal_id']}").json()["status"] == "APPROVED"
+    history = client.get(f"/journals/{session['journal_id']}/reviews")
+    assert history.status_code == 200
+    assert len(history.json()) == 1
+
+
+def test_review_can_request_revision_and_requires_notes(client):
+    session, teacher = submit_ready_journal(client)
+    missing_notes = client.post(f"/journals/{session['journal_id']}/review", json={
+        "reviewer_user_id": teacher["id"], "decision": "REQUEST_REVISION",
+    })
+    assert missing_notes.status_code == 422
+    reviewed = client.post(f"/journals/{session['journal_id']}/review", json={
+        "reviewer_user_id": teacher["id"], "decision": "REQUEST_REVISION",
+        "notes": "Mohon lengkapi catatan materi.",
+    })
+    assert reviewed.status_code == 201
+    assert client.get(f"/journals/{session['journal_id']}").json()["status"] == "REVISION_REQUIRED"
+
+
+def test_review_rejects_non_teacher_and_invalid_journal_state(client):
+    session, teacher = submit_ready_journal(client)
+    non_teacher = create_user(client, "review_admin", role="admin").json()
+    forbidden = client.post(f"/journals/{session['journal_id']}/review", json={
+        "reviewer_user_id": non_teacher["id"], "decision": "APPROVE",
+    })
+    assert forbidden.status_code == 403
+    approved = client.post(f"/journals/{session['journal_id']}/review", json={
+        "reviewer_user_id": teacher["id"], "decision": "APPROVE",
+    })
+    assert approved.status_code == 201
+    repeated = client.post(f"/journals/{session['journal_id']}/review", json={
+        "reviewer_user_id": teacher["id"], "decision": "REJECT", "notes": "Tidak sesuai.",
+    })
+    assert repeated.status_code == 400

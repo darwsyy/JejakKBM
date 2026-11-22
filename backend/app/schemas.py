@@ -184,7 +184,7 @@ class DailyJournalResponse(BaseModel):
     class_id: int
     journal_date: date
     officer_user_id: int
-    status: Literal["DRAFT", "SUBMITTED", "UNDER_REVIEW", "REVISION_REQUIRED", "RESUBMITTED", "APPROVED"]
+    status: Literal["DRAFT", "SUBMITTED", "UNDER_REVIEW", "REVISION_REQUIRED", "RESUBMITTED", "APPROVED", "REJECTED"]
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -271,3 +271,25 @@ class AttendanceCompletenessResponse(BaseModel):
 
 class JournalSubmitRequest(BaseModel):
     officer_user_id: int = Field(ge=1)
+
+
+class JournalReviewCreate(BaseModel):
+    reviewer_user_id: int = Field(ge=1)
+    decision: Literal["APPROVE", "REQUEST_REVISION", "REJECT"]
+    notes: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_notes(self):
+        if self.decision in ("REQUEST_REVISION", "REJECT") and not (self.notes or "").strip():
+            raise ValueError("Catatan wajib diisi untuk revisi atau penolakan.")
+        return self
+
+
+class JournalReviewResponse(BaseModel):
+    id: int
+    journal_id: int
+    reviewer_user_id: int
+    reviewer_name: str
+    decision: Literal["APPROVE", "REQUEST_REVISION", "REJECT"]
+    notes: str | None
+    reviewed_at: datetime

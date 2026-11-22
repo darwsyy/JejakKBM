@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    AttendanceRecord, ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, JournalSession, JournalSessionSlot, ScheduleSlot, ScheduleTeacherAssignment,
+    AttendanceRecord, ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, JournalReview, JournalSession, JournalSessionSlot, ScheduleSlot, ScheduleTeacherAssignment,
     ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
@@ -14,6 +14,8 @@ from app.schemas import (
     DailyJournalCreate,
     DailyJournalResponse,
     JournalSubmitRequest,
+    JournalReviewCreate,
+    JournalReviewResponse,
     JournalSessionCreate,
     JournalSessionResponse,
     AttendanceCreate,
@@ -1358,3 +1360,42 @@ def submit_daily_journal(
     db.commit()
     db.refresh(journal)
     return journal
+
+
+@app.get("/reviews/inbox", response_model=list[DailyJournalResponse], tags=["Journal Reviews"])
+def get_review_inbox(db: Session = Depends(get_db)):
+    return db.query(DailyJournal).filter(
+        DailyJournal.status.in_(["SUBMITTED", "RESUBMITTED"])
+    ).order_by(DailyJournal.journal_date, DailyJournal.id).all()
+
+
+@app.post("/journals/{journal_id}/review", response_model=JournalReviewResponse, status_code=status.HTTP_201_CREATED, tags=["Journal Reviews"])
+def review_daily_journal(journal_id: int, data: JournalReviewCreate, db: Session = Depends(get_db)):
+    journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
+    if journal is None:
+        raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
+    if journal.status not in ("SUBMITTED", "RESUBMITTED"):
+        raise HTTPException(status_code=400, detail="Jurnal belum dikirim atau sudah diperiksa.")
+    reviewer = db.query(User).filter(User.id == data.reviewer_user_id).first()
+    if reviewer is None or reviewer.role != "teacher" or not reviewer.is_active:
+        raise HTTPException(status_code=403, detail="Pemeriksa harus akun guru yang aktif.")
+    status_by_decision = {"APPROVE": "APPROVED", "REQUEST_REVISION": "REVISION_REQUIRED", "REJECT": "REJECTED"}
+    journal.status = status_by_decision[data.decision]
+    review = JournalReview(journal_id=journal_id, reviewer_user_id=reviewer.id, decision=data.decision, notes=data.notes.strip() if data.notes else None)
+    db.add(review)
+    db.commit()
+    db.refresh(review)
+    return JournalReviewResponse(id=review.id, journal_id=review.journal_id, reviewer_user_id=review.reviewer_user_id, reviewer_name=reviewer.full_name, decision=review.decision, notes=review.notes, reviewed_at=review.reviewed_at)
+
+
+@app.get("/journals/{journal_id}/reviews", response_model=list[JournalReviewResponse], tags=["Journal Reviews"])
+def get_journal_reviews(journal_id: int, db: Session = Depends(get_db)):
+    journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
+    if journal is None:
+        raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
+    reviews = db.query(JournalReview).filter(JournalReview.journal_id == journal_id).order_by(JournalReview.reviewed_at, JournalReview.id).all()
+    results = []
+    for review in reviews:
+        reviewer = db.query(User).filter(User.id == review.reviewer_user_id).first()
+        results.append(JournalReviewResponse(id=review.id, journal_id=review.journal_id, reviewer_user_id=review.reviewer_user_id, reviewer_name=reviewer.full_name, decision=review.decision, notes=review.notes, reviewed_at=review.reviewed_at))
+    return results
