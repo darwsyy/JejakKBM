@@ -97,3 +97,16 @@ class ScheduleSubjectAssignment(Base):
         ForeignKey("subjects.id"),
         nullable=False,
     )
+
+
+class Student(Base):
+    __tablename__ = "students"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    nis: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    full_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    class_id: Mapped[int] = mapped_column(
+        ForeignKey("classes.id"),
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

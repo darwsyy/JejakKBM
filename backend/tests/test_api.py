@@ -394,3 +394,78 @@ def test_subject_assignment_rejects_missing_slot_or_subject(client):
 
     assert missing_slot.status_code == 404
     assert missing_subject.status_code == 404
+
+
+def test_create_list_and_filter_students(client):
+    first_class = create_classroom(client, "X TKJ 1").json()
+    second_class = create_classroom(client, "X TKJ 2").json()
+
+    first = client.post("/students", json={
+        "nis": "10001", "full_name": "Andi Saputra", "class_id": first_class["id"]
+    })
+    second = client.post("/students", json={
+        "nis": "10002", "full_name": "Budi Santoso", "class_id": second_class["id"]
+    })
+
+    assert first.status_code == 201
+    assert first.json()["is_active"] is True
+    assert second.status_code == 201
+    assert len(client.get("/students").json()) == 2
+    filtered = client.get(f"/students?class_id={first_class['id']}")
+    assert len(filtered.json()) == 1
+    assert filtered.json()[0]["nis"] == "10001"
+
+
+def test_student_nis_must_be_unique(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    data = {"nis": "10001", "full_name": "Andi Saputra", "class_id": classroom["id"]}
+
+    first = client.post("/students", json=data)
+    second = client.post("/students", json={**data, "full_name": "Budi Santoso"})
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+
+
+def test_student_requires_existing_class(client):
+    response = client.post("/students", json={
+        "nis": "10001", "full_name": "Andi Saputra", "class_id": 999
+    })
+    assert response.status_code == 404
+
+
+def test_student_can_be_updated_and_moved_to_another_class(client):
+    first_class = create_classroom(client, "X TKJ 1").json()
+    second_class = create_classroom(client, "X TKJ 2").json()
+    student = client.post("/students", json={
+        "nis": "10001", "full_name": "Andi Saputra", "class_id": first_class["id"]
+    }).json()
+
+    response = client.put(f"/students/{student['id']}", json={
+        "nis": "10001", "full_name": "Andi Pratama", "class_id": second_class["id"]
+    })
+
+    assert response.status_code == 200
+    assert response.json()["full_name"] == "Andi Pratama"
+    assert response.json()["class_id"] == second_class["id"]
+
+
+def test_student_can_be_deactivated_without_deleting_record(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    student = client.post("/students", json={
+        "nis": "10001", "full_name": "Andi Saputra", "class_id": classroom["id"]
+    }).json()
+
+    response = client.delete(f"/students/{student['id']}")
+
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
+    assert len(client.get("/students").json()) == 1
+
+
+def test_student_endpoints_reject_unknown_ids(client):
+    assert client.get("/students?class_id=999").status_code == 404
+    assert client.put("/students/999", json={
+        "nis": "10001", "full_name": "Andi Saputra", "class_id": 1
+    }).status_code == 404
+    assert client.delete("/students/999").status_code == 404

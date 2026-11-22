@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import (
     ClassOfficerAssignment, Classroom, ScheduleSlot, ScheduleTeacherAssignment,
-    ScheduleSubjectAssignment, Subject, User,
+    ScheduleSubjectAssignment, Student, Subject, User,
 )
 from app.schemas import (
     ClassOfficerResponse,
@@ -20,6 +20,9 @@ from app.schemas import (
     ScheduleSubjectResponse,
     SubjectCreate,
     SubjectResponse,
+    StudentCreate,
+    StudentResponse,
+    StudentUpdate,
 )
 
 app = FastAPI(
@@ -536,3 +539,99 @@ def remove_schedule_subject(slot_id: int, db: Session = Depends(get_db)):
 
     db.delete(assignment)
     db.commit()
+
+
+@app.post(
+    "/students",
+    response_model=StudentResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Students"],
+)
+def create_student(data: StudentCreate, db: Session = Depends(get_db)):
+    classroom = db.query(Classroom).filter(Classroom.id == data.class_id).first()
+    if classroom is None:
+        raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+
+    student = Student(
+        nis=data.nis.strip(),
+        full_name=data.full_name.strip(),
+        class_id=data.class_id,
+    )
+    if not student.nis or len(student.full_name) < 2:
+        raise HTTPException(status_code=422, detail="NIS dan nama siswa tidak valid.")
+
+    db.add(student)
+    try:
+        db.commit()
+        db.refresh(student)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="NIS sudah terdaftar.",
+        )
+    return student
+
+
+@app.get("/students", response_model=list[StudentResponse], tags=["Students"])
+def get_students(class_id: int | None = None, db: Session = Depends(get_db)):
+    query = db.query(Student)
+    if class_id is not None:
+        classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
+        if classroom is None:
+            raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+        query = query.filter(Student.class_id == class_id)
+    return query.order_by(Student.full_name).all()
+
+
+@app.put(
+    "/students/{student_id}",
+    response_model=StudentResponse,
+    tags=["Students"],
+)
+def update_student(
+    student_id: int,
+    data: StudentUpdate,
+    db: Session = Depends(get_db),
+):
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if student is None:
+        raise HTTPException(status_code=404, detail="Siswa tidak ditemukan.")
+
+    classroom = db.query(Classroom).filter(Classroom.id == data.class_id).first()
+    if classroom is None:
+        raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+
+    student.nis = data.nis.strip()
+    student.full_name = data.full_name.strip()
+    student.class_id = data.class_id
+    if not student.nis or len(student.full_name) < 2:
+        raise HTTPException(status_code=422, detail="NIS dan nama siswa tidak valid.")
+
+    try:
+        db.commit()
+        db.refresh(student)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="NIS sudah digunakan siswa lain.",
+        )
+    return student
+
+
+@app.delete(
+    "/students/{student_id}",
+    response_model=StudentResponse,
+    tags=["Students"],
+)
+def deactivate_student(student_id: int, db: Session = Depends(get_db)):
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if student is None:
+        raise HTTPException(status_code=404, detail="Siswa tidak ditemukan.")
+
+    # Data tidak dihapus permanen agar aman untuk riwayat absensi nantinya.
+    student.is_active = False
+    db.commit()
+    db.refresh(student)
+    return student

@@ -108,3 +108,25 @@ class ScheduleSubjectResponse(BaseModel):
     slot_id: int
     subject_id: int
     subject_name: str
+
+
+class StudentCreate(BaseModel):
+    nis: str = Field(min_length=1, max_length=20)
+    full_name: str = Field(min_length=2, max_length=100)
+    class_id: int = Field(ge=1)
+
+
+class StudentUpdate(BaseModel):
+    nis: str = Field(min_length=1, max_length=20)
+    full_name: str = Field(min_length=2, max_length=100)
+    class_id: int = Field(ge=1)
+
+
+class StudentResponse(BaseModel):
+    id: int
+    nis: str
+    full_name: str
+    class_id: int
+    is_active: bool
+
+    model_config = ConfigDict(from_attributes=True)

@@ -66,6 +66,10 @@ Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 | DELETE | /schedule-slots/{slot_id} | Menghapus slot jadwal |
 | POST | /subjects | Menambahkan mata pelajaran |
 | GET | /subjects | Melihat daftar mata pelajaran |
+| POST | /students | Menambahkan siswa ke kelas |
+| GET | /students | Melihat daftar siswa (opsional filter `?class_id=1`) |
+| PUT | /students/{student_id} | Mengubah data atau kelas siswa |
+| DELETE | /students/{student_id} | Menonaktifkan siswa tanpa menghapus data |
 | PUT | /schedule-slots/{slot_id}/subject/{subject_id} | Menetapkan atau mengganti mata pelajaran |
 | GET | /schedule-slots/{slot_id}/subject | Melihat mata pelajaran pada slot |
 | DELETE | /schedule-slots/{slot_id}/subject | Menghapus penugasan mata pelajaran |
@@ -86,3 +90,4 @@ python -m pytest -q
 - Slot dengan nomor JP harus berdurasi 45 menit. Slot istirahat/kegiatan khusus tidak perlu memiliki nomor JP.
 - Penugasan guru hanya berlaku untuk slot bertipe LESSON dan akun guru aktif.
 - Penugasan mata pelajaran hanya berlaku untuk slot bertipe LESSON. Satu slot memiliki maksimal satu mata pelajaran.
+- Setiap siswa memiliki NIS unik dan ditempatkan pada satu kelas. Penghapusan siswa dilakukan dengan menonaktifkan data, bukan menghapus permanen.
