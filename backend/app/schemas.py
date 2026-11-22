@@ -130,3 +130,21 @@ class StudentResponse(BaseModel):
     is_active: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TeacherCreate(BaseModel):
+    user_id: int = Field(ge=1)
+    nip: str | None = Field(default=None, max_length=30)
+
+
+class TeacherUpdate(BaseModel):
+    nip: str | None = Field(default=None, max_length=30)
+
+
+class TeacherResponse(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    full_name: str
+    nip: str | None
+    is_active: bool

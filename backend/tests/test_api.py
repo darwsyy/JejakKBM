@@ -469,3 +469,60 @@ def test_student_endpoints_reject_unknown_ids(client):
         "nis": "10001", "full_name": "Andi Saputra", "class_id": 1
     }).status_code == 404
     assert client.delete("/students/999").status_code == 404
+
+
+def test_create_and_list_teacher_profiles(client):
+    user = create_user(client, "guru1", role="teacher").json()
+    response = client.post("/teachers", json={"user_id": user["id"], "nip": "1987001"})
+
+    assert response.status_code == 201
+    assert response.json()["full_name"] == user["full_name"]
+    assert response.json()["nip"] == "1987001"
+    listed = client.get("/teachers")
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+
+
+def test_teacher_profile_requires_teacher_account(client):
+    user = create_user(client, "petugas1", role="class_officer").json()
+    response = client.post("/teachers", json={"user_id": user["id"]})
+    assert response.status_code == 400
+
+
+def test_teacher_profile_rejects_missing_or_duplicate_user(client):
+    missing = client.post("/teachers", json={"user_id": 999})
+    user = create_user(client, "guru1", role="teacher").json()
+    first = client.post("/teachers", json={"user_id": user["id"]})
+    second = client.post("/teachers", json={"user_id": user["id"]})
+
+    assert missing.status_code == 404
+    assert first.status_code == 201
+    assert second.status_code == 409
+
+
+def test_teacher_nip_must_be_unique(client):
+    first_user = create_user(client, "guru1", role="teacher").json()
+    second_user = create_user(client, "guru2", role="teacher").json()
+    first = client.post("/teachers", json={"user_id": first_user["id"], "nip": "1987001"})
+    second = client.post("/teachers", json={"user_id": second_user["id"], "nip": "1987001"})
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+
+
+def test_teacher_profile_can_be_updated_and_deactivated(client):
+    user = create_user(client, "guru1", role="teacher").json()
+    teacher = client.post("/teachers", json={"user_id": user["id"], "nip": "1987001"}).json()
+
+    updated = client.put(f"/teachers/{teacher['id']}", json={"nip": "1987002"})
+    deactivated = client.delete(f"/teachers/{teacher['id']}")
+
+    assert updated.status_code == 200
+    assert updated.json()["nip"] == "1987002"
+    assert deactivated.status_code == 200
+    assert deactivated.json()["is_active"] is False
+
+
+def test_teacher_profile_endpoints_reject_unknown_id(client):
+    assert client.put("/teachers/999", json={"nip": "123"}).status_code == 404
+    assert client.delete("/teachers/999").status_code == 404

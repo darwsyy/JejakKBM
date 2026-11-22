@@ -68,6 +68,10 @@ Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 | GET | /subjects | Melihat daftar mata pelajaran |
 | POST | /students | Menambahkan siswa ke kelas |
 | GET | /students | Melihat daftar siswa (opsional filter `?class_id=1`) |
+| POST | /teachers | Membuat profil guru dari akun role teacher |
+| GET | /teachers | Melihat daftar profil guru |
+| PUT | /teachers/{teacher_id} | Mengubah NIP guru |
+| DELETE | /teachers/{teacher_id} | Menonaktifkan profil guru |
 | PUT | /students/{student_id} | Mengubah data atau kelas siswa |
 | DELETE | /students/{student_id} | Menonaktifkan siswa tanpa menghapus data |
 | PUT | /schedule-slots/{slot_id}/subject/{subject_id} | Menetapkan atau mengganti mata pelajaran |
@@ -91,3 +95,4 @@ python -m pytest -q
 - Penugasan guru hanya berlaku untuk slot bertipe LESSON dan akun guru aktif.
 - Penugasan mata pelajaran hanya berlaku untuk slot bertipe LESSON. Satu slot memiliki maksimal satu mata pelajaran.
 - Setiap siswa memiliki NIS unik dan ditempatkan pada satu kelas. Penghapusan siswa dilakukan dengan menonaktifkan data, bukan menghapus permanen.
+- Profil guru terhubung ke satu akun dengan role teacher. NIP bersifat opsional dan unik jika diisi.

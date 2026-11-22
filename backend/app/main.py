@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import (
     ClassOfficerAssignment, Classroom, ScheduleSlot, ScheduleTeacherAssignment,
-    ScheduleSubjectAssignment, Student, Subject, User,
+    ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
     ClassOfficerResponse,
@@ -23,6 +23,9 @@ from app.schemas import (
     StudentCreate,
     StudentResponse,
     StudentUpdate,
+    TeacherCreate,
+    TeacherResponse,
+    TeacherUpdate,
 )
 
 app = FastAPI(
@@ -635,3 +638,99 @@ def deactivate_student(student_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(student)
     return student
+
+
+@app.post(
+    "/teachers",
+    response_model=TeacherResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Teachers"],
+)
+def create_teacher(data: TeacherCreate, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == data.user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Akun pengguna tidak ditemukan.")
+    if user.role != "teacher":
+        raise HTTPException(status_code=400, detail="Akun harus memiliki role teacher.")
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Akun guru tidak aktif.")
+
+    teacher = Teacher(user_id=data.user_id, nip=data.nip.strip() if data.nip else None)
+    if teacher.nip == "":
+        teacher.nip = None
+    db.add(teacher)
+    try:
+        db.commit()
+        db.refresh(teacher)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Akun guru atau NIP sudah terdaftar.",
+        )
+
+    return TeacherResponse(
+        id=teacher.id, user_id=user.id, username=user.username,
+        full_name=user.full_name, nip=teacher.nip, is_active=teacher.is_active,
+    )
+
+
+@app.get("/teachers", response_model=list[TeacherResponse], tags=["Teachers"])
+def get_teachers(db: Session = Depends(get_db)):
+    records = db.query(Teacher, User).join(User, Teacher.user_id == User.id).order_by(User.full_name).all()
+    return [
+        TeacherResponse(
+            id=teacher.id, user_id=user.id, username=user.username,
+            full_name=user.full_name, nip=teacher.nip, is_active=teacher.is_active,
+        )
+        for teacher, user in records
+    ]
+
+
+@app.put(
+    "/teachers/{teacher_id}",
+    response_model=TeacherResponse,
+    tags=["Teachers"],
+)
+def update_teacher(
+    teacher_id: int,
+    data: TeacherUpdate,
+    db: Session = Depends(get_db),
+):
+    teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
+    if teacher is None:
+        raise HTTPException(status_code=404, detail="Data guru tidak ditemukan.")
+
+    user = db.query(User).filter(User.id == teacher.user_id).first()
+    teacher.nip = data.nip.strip() if data.nip else None
+    try:
+        db.commit()
+        db.refresh(teacher)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="NIP sudah digunakan guru lain.")
+
+    return TeacherResponse(
+        id=teacher.id, user_id=user.id, username=user.username,
+        full_name=user.full_name, nip=teacher.nip, is_active=teacher.is_active,
+    )
+
+
+@app.delete(
+    "/teachers/{teacher_id}",
+    response_model=TeacherResponse,
+    tags=["Teachers"],
+)
+def deactivate_teacher(teacher_id: int, db: Session = Depends(get_db)):
+    teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
+    if teacher is None:
+        raise HTTPException(status_code=404, detail="Data guru tidak ditemukan.")
+
+    teacher.is_active = False
+    db.commit()
+    db.refresh(teacher)
+    user = db.query(User).filter(User.id == teacher.user_id).first()
+    return TeacherResponse(
+        id=teacher.id, user_id=user.id, username=user.username,
+        full_name=user.full_name, nip=teacher.nip, is_active=teacher.is_active,
+    )
