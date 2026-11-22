@@ -38,6 +38,20 @@ class ClassOfficerAssignment(Base):
     )
 
 
+class ScheduleTeacherAssignment(Base):
+    __tablename__ = "schedule_teacher_assignments"
+
+    # Satu slot hanya memiliki satu guru pengajar.
+    slot_id: Mapped[int] = mapped_column(
+        ForeignKey("schedule_slots.id"),
+        primary_key=True,
+    )
+    teacher_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+
+
 class ScheduleSlot(Base):
     __tablename__ = "schedule_slots"
     __table_args__ = (

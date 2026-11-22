@@ -3,7 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ClassOfficerAssignment, Classroom, ScheduleSlot, User
+from app.models import ClassOfficerAssignment, Classroom, ScheduleSlot, ScheduleTeacherAssignment, User
 from app.schemas import (
     ClassOfficerResponse,
     ClassroomCreate,
@@ -13,6 +13,7 @@ from app.schemas import (
     ScheduleSlotCreate,
     ScheduleSlotResponse,
     ScheduleSlotUpdate,
+    ScheduleTeacherResponse,
 )
 
 app = FastAPI(
@@ -281,6 +282,13 @@ def update_schedule_slot(
     for field, value in data.model_dump().items():
         setattr(slot, field, value)
 
+    if slot.slot_type != "LESSON":
+        assignment = db.query(ScheduleTeacherAssignment).filter(
+            ScheduleTeacherAssignment.slot_id == slot_id
+        ).first()
+        if assignment is not None:
+            db.delete(assignment)
+
     try:
         db.commit()
         db.refresh(slot)
@@ -292,6 +300,91 @@ def update_schedule_slot(
         )
 
     return slot
+
+
+@app.put(
+    "/schedule-slots/{slot_id}/teacher/{teacher_id}",
+    response_model=ScheduleTeacherResponse,
+    tags=["Schedule"],
+)
+def assign_schedule_teacher(
+    slot_id: int,
+    teacher_id: int,
+    db: Session = Depends(get_db),
+):
+    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == slot_id).first()
+    if slot is None:
+        raise HTTPException(status_code=404, detail="Slot jadwal tidak ditemukan.")
+    if slot.slot_type != "LESSON":
+        raise HTTPException(status_code=400, detail="Guru hanya dapat ditugaskan pada slot LESSON.")
+
+    teacher = db.query(User).filter(User.id == teacher_id).first()
+    if teacher is None:
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
+    if teacher.role != "teacher" or not teacher.is_active:
+        raise HTTPException(status_code=400, detail="Pengguna harus merupakan guru yang aktif.")
+
+    assignment = db.query(ScheduleTeacherAssignment).filter(
+        ScheduleTeacherAssignment.slot_id == slot_id
+    ).first()
+    if assignment is None:
+        assignment = ScheduleTeacherAssignment(slot_id=slot_id, teacher_id=teacher_id)
+        db.add(assignment)
+    else:
+        assignment.teacher_id = teacher_id
+
+    db.commit()
+    return ScheduleTeacherResponse(
+        slot_id=slot_id,
+        teacher_id=teacher.id,
+        teacher_name=teacher.full_name,
+        username=teacher.username,
+    )
+
+
+@app.get(
+    "/schedule-slots/{slot_id}/teacher",
+    response_model=ScheduleTeacherResponse,
+    tags=["Schedule"],
+)
+def get_schedule_teacher(slot_id: int, db: Session = Depends(get_db)):
+    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == slot_id).first()
+    if slot is None:
+        raise HTTPException(status_code=404, detail="Slot jadwal tidak ditemukan.")
+
+    assignment = db.query(ScheduleTeacherAssignment).filter(
+        ScheduleTeacherAssignment.slot_id == slot_id
+    ).first()
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="Slot belum memiliki guru pengajar.")
+
+    teacher = db.query(User).filter(User.id == assignment.teacher_id).first()
+    return ScheduleTeacherResponse(
+        slot_id=slot_id,
+        teacher_id=teacher.id,
+        teacher_name=teacher.full_name,
+        username=teacher.username,
+    )
+
+
+@app.delete(
+    "/schedule-slots/{slot_id}/teacher",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Schedule"],
+)
+def remove_schedule_teacher(slot_id: int, db: Session = Depends(get_db)):
+    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == slot_id).first()
+    if slot is None:
+        raise HTTPException(status_code=404, detail="Slot jadwal tidak ditemukan.")
+
+    assignment = db.query(ScheduleTeacherAssignment).filter(
+        ScheduleTeacherAssignment.slot_id == slot_id
+    ).first()
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="Slot belum memiliki guru pengajar.")
+
+    db.delete(assignment)
+    db.commit()
 
 
 @app.delete(
@@ -306,6 +399,12 @@ def delete_schedule_slot(slot_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Slot jadwal tidak ditemukan.",
         )
+
+    assignment = db.query(ScheduleTeacherAssignment).filter(
+        ScheduleTeacherAssignment.slot_id == slot_id
+    ).first()
+    if assignment is not None:
+        db.delete(assignment)
 
     db.delete(slot)
     db.commit()

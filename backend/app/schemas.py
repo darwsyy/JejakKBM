@@ -79,6 +79,13 @@ class ScheduleSlotUpdate(ScheduleSlotData):
     pass
 
 
+class ScheduleTeacherResponse(BaseModel):
+    slot_id: int
+    teacher_id: int
+    teacher_name: str
+    username: str
+
+
 class ScheduleSlotResponse(ScheduleSlotData):
     id: int
     class_id: int

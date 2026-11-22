@@ -60,6 +60,9 @@ Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 | POST | /classes/{class_id}/schedule-slots | Menambahkan slot jadwal kelas |
 | GET | /classes/{class_id}/schedule-slots | Melihat slot jadwal kelas (opsional filter `?day=Monday`) |
 | PUT | /schedule-slots/{slot_id} | Mengubah slot jadwal |
+| PUT | /schedule-slots/{slot_id}/teacher/{teacher_id} | Menetapkan atau mengganti guru pengajar |
+| GET | /schedule-slots/{slot_id}/teacher | Melihat guru pengajar slot |
+| DELETE | /schedule-slots/{slot_id}/teacher | Menghapus penugasan guru |
 | DELETE | /schedule-slots/{slot_id} | Menghapus slot jadwal |
 
 ## Menjalankan tes
@@ -76,3 +79,4 @@ python -m pytest -q
 - Penugasan petugas utama belum menyediakan fitur pergantian petugas.
 - Slot jadwal menyimpan hari, urutan, nomor JP (opsional), jam, dan jenis kegiatan.
 - Slot dengan nomor JP harus berdurasi 45 menit. Slot istirahat/kegiatan khusus tidak perlu memiliki nomor JP.
+- Penugasan guru hanya berlaku untuk slot bertipe LESSON dan akun guru aktif.
