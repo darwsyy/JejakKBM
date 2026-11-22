@@ -6,13 +6,15 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, ScheduleSlot, ScheduleTeacherAssignment,
+    ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, JournalSession, JournalSessionSlot, ScheduleSlot, ScheduleTeacherAssignment,
     ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
     ClassOfficerResponse,
     DailyJournalCreate,
     DailyJournalResponse,
+    JournalSessionCreate,
+    JournalSessionResponse,
     ClassOfficerPeriodCreate,
     ClassOfficerPeriodResponse,
     ClassroomCreate,
@@ -950,3 +952,128 @@ def get_daily_journal(journal_id: int, db: Session = Depends(get_db)):
     if journal is None:
         raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
     return journal
+
+
+def build_journal_session_response(db: Session, session: JournalSession):
+    subject = db.query(Subject).filter(Subject.id == session.subject_id).first()
+    teacher = db.query(User).filter(User.id == session.teacher_id).first()
+    links = db.query(JournalSessionSlot).filter(
+        JournalSessionSlot.session_id == session.id
+    ).all()
+    slots = [
+        db.query(ScheduleSlot).filter(ScheduleSlot.id == link.slot_id).first()
+        for link in links
+    ]
+    slots.sort(key=lambda slot: slot.slot_order)
+    return JournalSessionResponse(
+        id=session.id,
+        journal_id=session.journal_id,
+        subject_id=subject.id,
+        subject_name=subject.name,
+        teacher_id=teacher.id,
+        teacher_name=teacher.full_name,
+        slot_ids=[slot.id for slot in slots],
+        jp_numbers=[slot.jp_number for slot in slots],
+        material=session.material,
+        actual_start_time=session.actual_start_time,
+        actual_end_time=session.actual_end_time,
+    )
+
+
+@app.post(
+    "/journals/{journal_id}/sessions",
+    response_model=JournalSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Journal Sessions"],
+)
+def create_journal_session(
+    journal_id: int,
+    data: JournalSessionCreate,
+    db: Session = Depends(get_db),
+):
+    journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
+    if journal is None:
+        raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
+    if journal.status != "DRAFT":
+        raise HTTPException(status_code=400, detail="Sesi hanya dapat ditambahkan saat jurnal berstatus DRAFT.")
+
+    teacher = db.query(User).filter(User.id == data.teacher_id).first()
+    if teacher is None:
+        raise HTTPException(status_code=404, detail="Akun guru tidak ditemukan.")
+    if teacher.role != "teacher" or not teacher.is_active:
+        raise HTTPException(status_code=400, detail="Pengajar harus akun guru yang aktif.")
+
+    slots = db.query(ScheduleSlot).filter(
+        ScheduleSlot.id.in_(data.slot_ids),
+        ScheduleSlot.class_id == journal.class_id,
+        ScheduleSlot.day_of_week == journal.journal_date.strftime("%A"),
+    ).all()
+    if len(slots) != len(data.slot_ids):
+        raise HTTPException(status_code=400, detail="Semua JP harus berasal dari jadwal kelas dan hari jurnal.")
+    if any(slot.slot_type != "LESSON" or slot.jp_number is None for slot in slots):
+        raise HTTPException(status_code=400, detail="Sesi hanya dapat menggunakan slot LESSON yang memiliki nomor JP.")
+
+    slots.sort(key=lambda slot: slot.slot_order)
+    for previous, current in zip(slots, slots[1:]):
+        if current.slot_order != previous.slot_order + 1 or current.jp_number != previous.jp_number + 1:
+            raise HTTPException(status_code=400, detail="JP harus berurutan dan tidak boleh melewati istirahat atau kegiatan lain.")
+
+    subject_ids = set()
+    for slot in slots:
+        subject_assignment = db.query(ScheduleSubjectAssignment).filter(
+            ScheduleSubjectAssignment.slot_id == slot.id
+        ).first()
+        teacher_assignment = db.query(ScheduleTeacherAssignment).filter(
+            ScheduleTeacherAssignment.slot_id == slot.id
+        ).first()
+        if subject_assignment is None or teacher_assignment is None:
+            raise HTTPException(status_code=400, detail="Setiap JP harus memiliki mata pelajaran dan guru pada jadwal.")
+        subject_ids.add(subject_assignment.subject_id)
+        if teacher_assignment.teacher_id != data.teacher_id:
+            raise HTTPException(status_code=400, detail="Guru sesi harus sesuai dengan guru yang ditugaskan pada seluruh JP.")
+
+    if len(subject_ids) != 1:
+        raise HTTPException(status_code=400, detail="JP yang digabung harus memiliki mata pelajaran yang sama.")
+
+    for slot in slots:
+        already_used = db.query(JournalSessionSlot).join(
+            JournalSession, JournalSession.id == JournalSessionSlot.session_id
+        ).filter(
+            JournalSession.journal_id == journal_id,
+            JournalSessionSlot.slot_id == slot.id,
+        ).first()
+        if already_used is not None:
+            raise HTTPException(status_code=409, detail="JP ini sudah tercatat dalam sesi lain.")
+
+    session = JournalSession(
+        journal_id=journal_id,
+        subject_id=next(iter(subject_ids)),
+        teacher_id=data.teacher_id,
+        material=data.material.strip(),
+        actual_start_time=data.actual_start_time,
+        actual_end_time=data.actual_end_time,
+    )
+    if not session.material:
+        raise HTTPException(status_code=422, detail="Materi pembelajaran tidak boleh kosong.")
+    db.add(session)
+    db.flush()
+    for slot in slots:
+        db.add(JournalSessionSlot(session_id=session.id, slot_id=slot.id))
+    db.commit()
+    db.refresh(session)
+    return build_journal_session_response(db, session)
+
+
+@app.get(
+    "/journals/{journal_id}/sessions",
+    response_model=list[JournalSessionResponse],
+    tags=["Journal Sessions"],
+)
+def get_journal_sessions(journal_id: int, db: Session = Depends(get_db)):
+    journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
+    if journal is None:
+        raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
+    sessions = db.query(JournalSession).filter(
+        JournalSession.journal_id == journal_id
+    ).order_by(JournalSession.actual_start_time).all()
+    return [build_journal_session_response(db, session) for session in sessions]

@@ -146,3 +146,26 @@ class DailyJournal(Base):
     journal_date: Mapped[object] = mapped_column(Date, nullable=False)
     officer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="DRAFT", nullable=False)
+
+
+class JournalSession(Base):
+    __tablename__ = "journal_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    journal_id: Mapped[int] = mapped_column(ForeignKey("daily_journals.id"), nullable=False)
+    subject_id: Mapped[int] = mapped_column(ForeignKey("subjects.id"), nullable=False)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    material: Mapped[str] = mapped_column(String(1000), nullable=False)
+    actual_start_time: Mapped[str] = mapped_column(String(5), nullable=False)
+    actual_end_time: Mapped[str] = mapped_column(String(5), nullable=False)
+
+
+class JournalSessionSlot(Base):
+    __tablename__ = "journal_session_slots"
+    __table_args__ = (
+        UniqueConstraint("session_id", "slot_id", name="unique_session_schedule_slot"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("journal_sessions.id"), nullable=False)
+    slot_id: Mapped[int] = mapped_column(ForeignKey("schedule_slots.id"), nullable=False)

@@ -737,3 +737,107 @@ def test_list_daily_journals_can_filter_by_class_and_date(client):
 
 def test_daily_journal_detail_returns_404_for_unknown_id(client):
     assert client.get("/journals/999").status_code == 404
+
+
+def setup_journal_with_two_lesson_slots(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    officer = create_user(client, "petugas1").json()
+    teacher = create_user(client, "guru1", role="teacher").json()
+    create_officer_period(client, classroom["id"], officer["id"])
+    journal = client.post("/journals", json={
+        "class_id": classroom["id"], "journal_date": "2026-11-23",
+        "officer_user_id": officer["id"],
+    }).json()
+    subject = client.post("/subjects", json={"name": "Matematika"}).json()
+    slot_ids = []
+    for order, jp, start, end in [(1, 2, "08:30", "09:15"), (2, 3, "09:15", "10:00")]:
+        slot = client.post(f"/classes/{classroom['id']}/schedule-slots", json={
+            "day_of_week": "Monday", "slot_order": order, "jp_number": jp,
+            "start_time": start, "end_time": end, "slot_type": "LESSON",
+        }).json()
+        slot_ids.append(slot["id"])
+        client.put(f"/schedule-slots/{slot['id']}/teacher/{teacher['id']}")
+        client.put(f"/schedule-slots/{slot['id']}/subject/{subject['id']}")
+    return journal, teacher, slot_ids
+
+
+def test_create_journal_session_with_two_consecutive_jps(client):
+    journal, teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
+    response = client.post(f"/journals/{journal['id']}/sessions", json={
+        "slot_ids": slot_ids, "teacher_id": teacher["id"],
+        "material": "Pengenalan aljabar",
+        "actual_start_time": "08:35", "actual_end_time": "09:55",
+    })
+
+    assert response.status_code == 201
+    assert response.json()["jp_numbers"] == [2, 3]
+    assert response.json()["subject_name"] == "Matematika"
+    assert len(client.get(f"/journals/{journal['id']}/sessions").json()) == 1
+
+
+def test_journal_session_rejects_non_consecutive_jps(client):
+    journal, teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
+    # JP 2 dan JP 4 dipisahkan oleh slot istirahat / slot jadwal lain.
+    third = client.post(f"/classes/1/schedule-slots", json={
+        "day_of_week": "Monday", "slot_order": 4, "jp_number": 4,
+        "start_time": "10:15", "end_time": "11:00", "slot_type": "LESSON",
+    }).json()
+    client.put(f"/schedule-slots/{third['id']}/teacher/{teacher['id']}")
+    subject = client.get(f"/schedule-slots/{slot_ids[0]}/subject").json()
+    client.put(f"/schedule-slots/{third['id']}/subject/{subject['subject_id']}")
+    response = client.post(f"/journals/{journal['id']}/sessions", json={
+        "slot_ids": [slot_ids[0], third["id"]], "teacher_id": teacher["id"],
+        "material": "Materi", "actual_start_time": "08:30", "actual_end_time": "11:00",
+    })
+    assert response.status_code == 400
+
+
+def test_journal_session_rejects_wrong_teacher_or_missing_schedule_assignment(client):
+    journal, teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
+    other_teacher = create_user(client, "guru2", role="teacher").json()
+    response = client.post(f"/journals/{journal['id']}/sessions", json={
+        "slot_ids": slot_ids, "teacher_id": other_teacher["id"],
+        "material": "Materi", "actual_start_time": "07:00", "actual_end_time": "08:30",
+    })
+    assert response.status_code == 400
+
+
+def test_journal_session_cannot_reuse_a_slot(client):
+    journal, teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
+    data = {
+        "slot_ids": [slot_ids[0]], "teacher_id": teacher["id"],
+        "material": "Materi", "actual_start_time": "08:30", "actual_end_time": "09:10",
+    }
+    first = client.post(f"/journals/{journal['id']}/sessions", json=data)
+    second = client.post(f"/journals/{journal['id']}/sessions", json=data)
+    assert first.status_code == 201
+    assert second.status_code == 409
+
+
+def test_journal_session_rejects_invalid_actual_time_and_empty_material(client):
+    journal, teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
+    invalid_time = client.post(f"/journals/{journal['id']}/sessions", json={
+        "slot_ids": [slot_ids[0]], "teacher_id": teacher["id"],
+        "material": "Materi", "actual_start_time": "08:00", "actual_end_time": "07:00",
+    })
+    empty_material = client.post(f"/journals/{journal['id']}/sessions", json={
+        "slot_ids": [slot_ids[0]], "teacher_id": teacher["id"],
+        "material": "  ", "actual_start_time": "08:30", "actual_end_time": "09:10",
+    })
+    assert invalid_time.status_code == 422
+    assert empty_material.status_code == 422
+
+
+def test_journal_session_rejects_missing_journal_and_lists_empty_sessions(client):
+    assert client.post("/journals/999/sessions", json={
+        "slot_ids": [1], "teacher_id": 1, "material": "Materi",
+        "actual_start_time": "08:30", "actual_end_time": "09:10",
+    }).status_code == 404
+    classroom = create_classroom(client, "X TKJ 1").json()
+    officer = create_user(client, "petugas1").json()
+    create_officer_period(client, classroom["id"], officer["id"])
+    journal = client.post("/journals", json={
+        "class_id": classroom["id"], "journal_date": "2026-11-23",
+        "officer_user_id": officer["id"],
+    }).json()
+    assert client.get(f"/journals/{journal['id']}/sessions").json() == []

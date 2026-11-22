@@ -187,3 +187,35 @@ class DailyJournalResponse(BaseModel):
     status: Literal["DRAFT", "SUBMITTED", "UNDER_REVIEW", "REVISION_REQUIRED", "RESUBMITTED", "APPROVED"]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class JournalSessionCreate(BaseModel):
+    slot_ids: list[int] = Field(min_length=1)
+    teacher_id: int = Field(ge=1)
+    material: str = Field(min_length=3, max_length=1000)
+    actual_start_time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    actual_end_time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+    @model_validator(mode="after")
+    def validate_actual_time(self):
+        start = datetime.strptime(self.actual_start_time, "%H:%M")
+        end = datetime.strptime(self.actual_end_time, "%H:%M")
+        if end <= start:
+            raise ValueError("Waktu selesai harus setelah waktu mulai.")
+        if len(set(self.slot_ids)) != len(self.slot_ids):
+            raise ValueError("JP yang sama tidak boleh dipilih lebih dari sekali.")
+        return self
+
+
+class JournalSessionResponse(BaseModel):
+    id: int
+    journal_id: int
+    subject_id: int
+    subject_name: str
+    teacher_id: int
+    teacher_name: str
+    slot_ids: list[int]
+    jp_numbers: list[int]
+    material: str
+    actual_start_time: str
+    actual_end_time: str
