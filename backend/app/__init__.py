@@ -1,0 +1,1 @@
+"""JejakKBM backend application package."""
