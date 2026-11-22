@@ -79,6 +79,8 @@ Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 | POST | /journals | Membuat jurnal harian kelas (idempotent) |
 | POST | /journals/{journal_id}/sessions | Mencatat sesi pembelajaran dan JP yang digabung |
 | GET | /journals/{journal_id}/sessions | Melihat sesi pembelajaran dalam jurnal |
+| POST | /journal-sessions/{session_id}/attendance | Mengisi absensi seorang siswa untuk satu JP |
+| GET | /journal-sessions/{session_id}/attendance | Melihat absensi dalam satu sesi |
 | GET | /journals | Melihat jurnal (filter `class_id` atau `journal_date`) |
 | GET | /journals/{journal_id} | Melihat detail jurnal |
 | POST | /students | Menambahkan siswa ke kelas |
@@ -118,3 +120,4 @@ python -m pytest -q
 - Riwayat petugas jurnal disimpan per periode tanggal. Periode untuk kelas yang sama tidak boleh bertumpang tindih; `end_date` boleh kosong untuk penugasan yang masih berjalan.
 - Satu kelas hanya memiliki satu jurnal per tanggal. Pembuatan jurnal memeriksa periode petugas dan aman diulang tanpa membuat jurnal duplikat. Jurnal baru berstatus `DRAFT`.
 - Sesi pembelajaran hanya memakai slot `LESSON` yang berurutan pada hari jurnal, dengan mata pelajaran dan guru jadwal yang sama. Waktu aktual serta materi dicatat pada sesi.
+- Absensi disimpan per siswa dan per JP. Hanya guru pengajar sesi yang dapat mengisi; siswa harus berasal dari kelas jurnal. Status sementara: `PRESENT`, `SICK`, `PERMITTED`, `ABSENT`.

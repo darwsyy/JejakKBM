@@ -219,3 +219,23 @@ class JournalSessionResponse(BaseModel):
     material: str
     actual_start_time: str
     actual_end_time: str
+
+
+class AttendanceCreate(BaseModel):
+    slot_id: int = Field(ge=1)
+    student_id: int = Field(ge=1)
+    teacher_id: int = Field(ge=1)
+    attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "ABSENT"]
+
+
+class AttendanceResponse(BaseModel):
+    id: int
+    session_id: int
+    slot_id: int
+    jp_number: int
+    student_id: int
+    student_name: str
+    teacher_id: int
+    teacher_name: str
+    attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "ABSENT"]
+    recorded_at: datetime

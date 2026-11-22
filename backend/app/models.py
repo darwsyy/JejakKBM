@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Date, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -169,3 +169,21 @@ class JournalSessionSlot(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     session_id: Mapped[int] = mapped_column(ForeignKey("journal_sessions.id"), nullable=False)
     slot_id: Mapped[int] = mapped_column(ForeignKey("schedule_slots.id"), nullable=False)
+
+
+class AttendanceRecord(Base):
+    __tablename__ = "attendance_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id", "slot_id", "student_id",
+            name="unique_student_attendance_per_jp",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("journal_sessions.id"), nullable=False)
+    slot_id: Mapped[int] = mapped_column(ForeignKey("schedule_slots.id"), nullable=False)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), nullable=False)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    attendance_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    recorded_at: Mapped[object] = mapped_column(DateTime, server_default=func.now(), nullable=False)

@@ -841,3 +841,94 @@ def test_journal_session_rejects_missing_journal_and_lists_empty_sessions(client
         "officer_user_id": officer["id"],
     }).json()
     assert client.get(f"/journals/{journal['id']}/sessions").json() == []
+
+
+def setup_session_with_student(client):
+    journal, teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
+    student = client.post("/students", json={
+        "nis": "S001", "full_name": "Siswa Satu",
+        "class_id": 1,
+    }).json()
+    session = client.post(f"/journals/{journal['id']}/sessions", json={
+        "slot_ids": slot_ids, "teacher_id": teacher["id"],
+        "material": "Materi pengantar",
+        "actual_start_time": "08:35", "actual_end_time": "09:55",
+    }).json()
+    return session, teacher, student, slot_ids
+
+
+def test_teacher_can_record_attendance_per_student_and_jp(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    response = client.post(f"/journal-sessions/{session['id']}/attendance", json={
+        "slot_id": slot_ids[0], "student_id": student["id"],
+        "teacher_id": teacher["id"], "attendance_status": "PRESENT",
+    })
+    assert response.status_code == 201
+    assert response.json()["jp_number"] == 2
+    assert response.json()["attendance_status"] == "PRESENT"
+    assert len(client.get(f"/journal-sessions/{session['id']}/attendance").json()) == 1
+
+
+def test_teacher_can_record_same_student_for_each_jp(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    for slot_id in slot_ids:
+        response = client.post(f"/journal-sessions/{session['id']}/attendance", json={
+            "slot_id": slot_id, "student_id": student["id"],
+            "teacher_id": teacher["id"], "attendance_status": "PRESENT",
+        })
+        assert response.status_code == 201
+    assert len(client.get(f"/journal-sessions/{session['id']}/attendance").json()) == 2
+
+
+def test_attendance_rejects_non_teaching_user(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    officer = create_user(client, "petugas2", role="class_officer").json()
+    response = client.post(f"/journal-sessions/{session['id']}/attendance", json={
+        "slot_id": slot_ids[0], "student_id": student["id"],
+        "teacher_id": officer["id"], "attendance_status": "PRESENT",
+    })
+    assert response.status_code == 403
+
+
+def test_attendance_rejects_student_from_another_class(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    other_class = create_classroom(client, "X TKJ 2").json()
+    other_student = client.post("/students", json={
+        "nis": "S002", "full_name": "Siswa Dua",
+        "class_id": other_class["id"],
+    }).json()
+    response = client.post(f"/journal-sessions/{session['id']}/attendance", json={
+        "slot_id": slot_ids[0], "student_id": other_student["id"],
+        "teacher_id": teacher["id"], "attendance_status": "PRESENT",
+    })
+    assert response.status_code == 400
+
+
+def test_attendance_rejects_slot_outside_session_and_duplicate_record(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    data = {
+        "slot_id": slot_ids[0], "student_id": student["id"],
+        "teacher_id": teacher["id"], "attendance_status": "SICK",
+    }
+    first = client.post(f"/journal-sessions/{session['id']}/attendance", json=data)
+    duplicate = client.post(f"/journal-sessions/{session['id']}/attendance", json=data)
+    invalid_slot = client.post(f"/journal-sessions/{session['id']}/attendance", json={
+        **data, "slot_id": 999, "student_id": student["id"],
+    })
+    assert first.status_code == 201
+    assert duplicate.status_code == 409
+    assert invalid_slot.status_code == 400
+
+
+def test_attendance_rejects_invalid_status_and_unknown_session(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    invalid = client.post(f"/journal-sessions/{session['id']}/attendance", json={
+        "slot_id": slot_ids[0], "student_id": student["id"],
+        "teacher_id": teacher["id"], "attendance_status": "UNKNOWN",
+    })
+    missing = client.post("/journal-sessions/999/attendance", json={
+        "slot_id": slot_ids[0], "student_id": student["id"],
+        "teacher_id": teacher["id"], "attendance_status": "PRESENT",
+    })
+    assert invalid.status_code == 422
+    assert missing.status_code == 404

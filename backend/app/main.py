@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, JournalSession, JournalSessionSlot, ScheduleSlot, ScheduleTeacherAssignment,
+    AttendanceRecord, ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, JournalSession, JournalSessionSlot, ScheduleSlot, ScheduleTeacherAssignment,
     ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
@@ -15,6 +15,8 @@ from app.schemas import (
     DailyJournalResponse,
     JournalSessionCreate,
     JournalSessionResponse,
+    AttendanceCreate,
+    AttendanceResponse,
     ClassOfficerPeriodCreate,
     ClassOfficerPeriodResponse,
     ClassroomCreate,
@@ -1077,3 +1079,88 @@ def get_journal_sessions(journal_id: int, db: Session = Depends(get_db)):
         JournalSession.journal_id == journal_id
     ).order_by(JournalSession.actual_start_time).all()
     return [build_journal_session_response(db, session) for session in sessions]
+
+
+def build_attendance_response(db: Session, record: AttendanceRecord):
+    student = db.query(Student).filter(Student.id == record.student_id).first()
+    teacher = db.query(User).filter(User.id == record.teacher_id).first()
+    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == record.slot_id).first()
+    return AttendanceResponse(
+        id=record.id, session_id=record.session_id, slot_id=slot.id,
+        jp_number=slot.jp_number, student_id=student.id,
+        student_name=student.full_name, teacher_id=teacher.id,
+        teacher_name=teacher.full_name,
+        attendance_status=record.attendance_status, recorded_at=record.recorded_at,
+    )
+
+
+@app.post(
+    "/journal-sessions/{session_id}/attendance",
+    response_model=AttendanceResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Attendance"],
+)
+def create_attendance(
+    session_id: int,
+    data: AttendanceCreate,
+    db: Session = Depends(get_db),
+):
+    session = db.query(JournalSession).filter(JournalSession.id == session_id).first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Sesi pembelajaran tidak ditemukan.")
+
+    journal = db.query(DailyJournal).filter(DailyJournal.id == session.journal_id).first()
+    if journal.status != "DRAFT":
+        raise HTTPException(status_code=400, detail="Absensi hanya dapat diisi saat jurnal berstatus DRAFT.")
+
+    if data.teacher_id != session.teacher_id:
+        raise HTTPException(status_code=403, detail="Hanya guru pengajar sesi ini yang boleh mengisi absensi.")
+    teacher = db.query(User).filter(User.id == data.teacher_id).first()
+    if teacher is None or teacher.role != "teacher" or not teacher.is_active:
+        raise HTTPException(status_code=403, detail="Akun pengisi harus guru yang aktif.")
+
+    session_slot = db.query(JournalSessionSlot).filter(
+        JournalSessionSlot.session_id == session_id,
+        JournalSessionSlot.slot_id == data.slot_id,
+    ).first()
+    if session_slot is None:
+        raise HTTPException(status_code=400, detail="JP tersebut tidak termasuk dalam sesi ini.")
+
+    student = db.query(Student).filter(Student.id == data.student_id).first()
+    if student is None or not student.is_active:
+        raise HTTPException(status_code=404, detail="Siswa tidak ditemukan atau tidak aktif.")
+    if student.class_id != journal.class_id:
+        raise HTTPException(status_code=400, detail="Siswa bukan anggota kelas pada jurnal ini.")
+
+    existing = db.query(AttendanceRecord).filter(
+        AttendanceRecord.session_id == session_id,
+        AttendanceRecord.slot_id == data.slot_id,
+        AttendanceRecord.student_id == data.student_id,
+    ).first()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Absensi siswa untuk JP ini sudah diisi.")
+
+    record = AttendanceRecord(
+        session_id=session_id, slot_id=data.slot_id,
+        student_id=data.student_id, teacher_id=data.teacher_id,
+        attendance_status=data.attendance_status,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return build_attendance_response(db, record)
+
+
+@app.get(
+    "/journal-sessions/{session_id}/attendance",
+    response_model=list[AttendanceResponse],
+    tags=["Attendance"],
+)
+def get_session_attendance(session_id: int, db: Session = Depends(get_db)):
+    session = db.query(JournalSession).filter(JournalSession.id == session_id).first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Sesi pembelajaran tidak ditemukan.")
+    records = db.query(AttendanceRecord).filter(
+        AttendanceRecord.session_id == session_id
+    ).order_by(AttendanceRecord.slot_id, AttendanceRecord.student_id).all()
+    return [build_attendance_response(db, record) for record in records]
