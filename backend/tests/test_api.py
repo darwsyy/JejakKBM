@@ -1331,3 +1331,61 @@ def test_daily_dashboard_uses_today_by_default_and_handles_empty_date(client):
     assert empty_day.status_code == 200
     assert empty_day.json()["total_journals"] == 0
     assert empty_day.json()["status_counts"]["DRAFT"] == 0
+
+
+
+def test_class_dashboard_shows_sessions_attendance_and_review_history(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    for slot_id in slot_ids:
+        response = client.post(f"/journal-sessions/{session['id']}/attendance", json={
+            "slot_id": slot_id,
+            "student_id": student["id"],
+            "teacher_id": teacher["id"],
+            "attendance_status": "PRESENT",
+        })
+        assert response.status_code == 201
+
+    journal_id = session["journal_id"]
+    admin = create_user(client, "class_dash_admin", role="admin").json()
+    roster = client.post("/duty-rosters", json={
+        "duty_date": "2026-11-23",
+        "teacher_user_id": teacher["id"],
+        "assigned_by_user_id": admin["id"],
+    })
+    assert roster.status_code == 201
+    submitted = client.post(f"/journals/{journal_id}/submit", json={"officer_user_id": 1})
+    assert submitted.status_code == 200
+    reviewed = client.post(f"/journals/{journal_id}/review", json={
+        "reviewer_user_id": teacher["id"],
+        "decision": "REQUEST_REVISION",
+        "notes": "Lengkapi catatan pembelajaran.",
+    })
+    assert reviewed.status_code == 201
+
+    class_id = client.get(f"/journals/{journal_id}").json()["class_id"]
+    response = client.get(f"/dashboard/classes/{class_id}?report_date=2026-11-23")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["journal_id"] == journal_id
+    assert result["journal_status"] == "REVISION_REQUIRED"
+    assert result["total_sessions"] == 1
+    assert result["sessions"][0]["teacher_name"] == teacher["full_name"]
+    assert result["sessions"][0]["material"]
+    assert result["attendance_counts"]["PRESENT"] == len(slot_ids)
+    assert result["reviews"][0]["notes"] == "Lengkapi catatan pembelajaran."
+
+
+def test_class_dashboard_handles_missing_journal_and_unknown_class(client):
+    classroom = create_classroom(client, "X TKJ Dashboard").json()
+    response = client.get(
+        f"/dashboard/classes/{classroom['id']}?report_date=2026-11-23"
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["journal_id"] is None
+    assert result["journal_status"] == "MISSING"
+    assert result["sessions"] == []
+    assert result["attendance_counts"]["PRESENT"] == 0
+
+    missing = client.get("/dashboard/classes/999?report_date=2026-11-23")
+    assert missing.status_code == 404

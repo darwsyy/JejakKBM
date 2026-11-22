@@ -337,3 +337,34 @@ class DailyDashboardResponse(BaseModel):
     total_journals: int
     status_counts: dict[str, int]
     missing_classes: list[str]
+
+
+class ClassDashboardSessionResponse(BaseModel):
+    session_id: int
+    subject_name: str
+    teacher_id: int
+    teacher_name: str
+    jp_numbers: list[int]
+    material: str
+    actual_start_time: str
+    actual_end_time: str
+    attendance_counts: dict[str, int]
+
+
+class ClassDashboardReviewResponse(BaseModel):
+    decision: str
+    reviewer_name: str
+    notes: str | None
+    reviewed_at: datetime
+
+
+class ClassDashboardResponse(BaseModel):
+    report_date: date
+    class_id: int
+    class_name: str
+    journal_id: int | None
+    journal_status: str
+    total_sessions: int
+    attendance_counts: dict[str, int]
+    sessions: list[ClassDashboardSessionResponse]
+    reviews: list[ClassDashboardReviewResponse]

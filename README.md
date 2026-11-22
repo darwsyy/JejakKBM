@@ -168,3 +168,11 @@ python -m pytest -q
 - Gunakan `GET /dashboard/daily?report_date=YYYY-MM-DD` untuk melihat tanggal tertentu.
 - Respons berisi jumlah seluruh kelas, jumlah jurnal yang dibuat, jumlah jurnal berdasarkan status (`DRAFT`, `SUBMITTED`, `RESUBMITTED`, `REVISION_REQUIRED`, `APPROVED`, `REJECTED`), serta nama kelas yang belum membuat jurnal pada tanggal tersebut.
 - Dashboard menghitung berdasarkan tanggal jurnal, bukan tanggal saat data diperiksa. Kelas tanpa jadwal tetap muncul dalam daftar jika belum memiliki jurnal.
+
+
+### Dashboard detail per kelas
+
+- `GET /dashboard/classes/{class_id}` menampilkan rincian jurnal kelas untuk tanggal hari ini.
+- Gunakan `?report_date=YYYY-MM-DD` untuk memilih tanggal.
+- Respons berisi status jurnal (atau `MISSING` jika belum dibuat), daftar sesi, guru, mata pelajaran, JP, materi, waktu aktual, jumlah absensi per status, dan riwayat catatan pemeriksaan.
+- Jika jurnal belum ada, endpoint tetap mengembalikan ringkasan kosong agar dashboard dapat menampilkan kelas yang belum mengirim jurnal.

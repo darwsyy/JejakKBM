@@ -10,6 +10,9 @@ from app.models import (
     ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
+    ClassDashboardResponse,
+    ClassDashboardSessionResponse,
+    ClassDashboardReviewResponse,
     DailyDashboardResponse,
     ClassOfficerResponse,
     DailyJournalCreate,
@@ -1553,3 +1556,89 @@ def get_journal_reviews(journal_id: int, db: Session = Depends(get_db)):
         reviewer = db.query(User).filter(User.id == review.reviewer_user_id).first()
         results.append(JournalReviewResponse(id=review.id, journal_id=review.journal_id, reviewer_user_id=review.reviewer_user_id, reviewer_name=reviewer.full_name, decision=review.decision, notes=review.notes, reviewed_at=review.reviewed_at))
     return results
+
+
+@app.get(
+    "/dashboard/classes/{class_id}",
+    response_model=ClassDashboardResponse,
+    tags=["Dashboard"],
+)
+def get_class_dashboard(
+    class_id: int,
+    report_date: date | None = None,
+    db: Session = Depends(get_db),
+):
+    selected_date = report_date or date.today()
+    classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
+    if classroom is None:
+        raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+
+    journal = db.query(DailyJournal).filter(
+        DailyJournal.class_id == class_id,
+        DailyJournal.journal_date == selected_date,
+    ).first()
+    attendance_statuses = ["PRESENT", "SICK", "PERMITTED", "ABSENT"]
+    total_counts = {name: 0 for name in attendance_statuses}
+    session_results = []
+    reviews = []
+
+    if journal is not None:
+        sessions = db.query(JournalSession).filter(
+            JournalSession.journal_id == journal.id
+        ).order_by(JournalSession.actual_start_time).all()
+
+        for session in sessions:
+            subject = db.query(Subject).filter(Subject.id == session.subject_id).first()
+            teacher = db.query(User).filter(User.id == session.teacher_id).first()
+            links = db.query(JournalSessionSlot).filter(
+                JournalSessionSlot.session_id == session.id
+            ).all()
+            slots = [
+                db.query(ScheduleSlot).filter(ScheduleSlot.id == link.slot_id).first()
+                for link in links
+            ]
+            slots.sort(key=lambda slot: slot.slot_order)
+            records = db.query(AttendanceRecord).filter(
+                AttendanceRecord.session_id == session.id
+            ).all()
+            counts = {name: 0 for name in attendance_statuses}
+            for record in records:
+                if record.attendance_status in counts:
+                    counts[record.attendance_status] += 1
+                    total_counts[record.attendance_status] += 1
+
+            session_results.append(ClassDashboardSessionResponse(
+                session_id=session.id,
+                subject_name=subject.name,
+                teacher_id=teacher.id,
+                teacher_name=teacher.full_name,
+                jp_numbers=[slot.jp_number for slot in slots],
+                material=session.material,
+                actual_start_time=session.actual_start_time,
+                actual_end_time=session.actual_end_time,
+                attendance_counts=counts,
+            ))
+
+        review_rows = db.query(JournalReview).filter(
+            JournalReview.journal_id == journal.id
+        ).order_by(JournalReview.reviewed_at, JournalReview.id).all()
+        for review in review_rows:
+            reviewer = db.query(User).filter(User.id == review.reviewer_user_id).first()
+            reviews.append(ClassDashboardReviewResponse(
+                decision=review.decision,
+                reviewer_name=reviewer.full_name,
+                notes=review.notes,
+                reviewed_at=review.reviewed_at,
+            ))
+
+    return ClassDashboardResponse(
+        report_date=selected_date,
+        class_id=classroom.id,
+        class_name=classroom.name,
+        journal_id=journal.id if journal else None,
+        journal_status=journal.status if journal else "MISSING",
+        total_sessions=len(session_results),
+        attendance_counts=total_counts,
+        sessions=session_results,
+        reviews=reviews,
+    )
