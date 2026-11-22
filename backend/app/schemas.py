@@ -171,3 +171,19 @@ class ClassOfficerPeriodResponse(BaseModel):
     full_name: str
     start_date: date
     end_date: date | None
+
+
+class DailyJournalCreate(BaseModel):
+    class_id: int = Field(ge=1)
+    journal_date: date
+    officer_user_id: int = Field(ge=1)
+
+
+class DailyJournalResponse(BaseModel):
+    id: int
+    class_id: int
+    journal_date: date
+    officer_user_id: int
+    status: Literal["DRAFT", "SUBMITTED", "UNDER_REVIEW", "REVISION_REQUIRED", "RESUBMITTED", "APPROVED"]
+
+    model_config = ConfigDict(from_attributes=True)

@@ -133,3 +133,16 @@ class ClassOfficerPeriod(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     start_date: Mapped[object] = mapped_column(Date, nullable=False)
     end_date: Mapped[object | None] = mapped_column(Date, nullable=True)
+
+
+class DailyJournal(Base):
+    __tablename__ = "daily_journals"
+    __table_args__ = (
+        UniqueConstraint("class_id", "journal_date", name="unique_class_journal_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), nullable=False)
+    journal_date: Mapped[object] = mapped_column(Date, nullable=False)
+    officer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="DRAFT", nullable=False)

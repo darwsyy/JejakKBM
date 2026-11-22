@@ -76,6 +76,9 @@ Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 | DELETE | /schedule-slots/{slot_id} | Menghapus slot jadwal |
 | POST | /subjects | Menambahkan mata pelajaran |
 | GET | /subjects | Melihat daftar mata pelajaran |
+| POST | /journals | Membuat jurnal harian kelas (idempotent) |
+| GET | /journals | Melihat jurnal (filter `class_id` atau `journal_date`) |
+| GET | /journals/{journal_id} | Melihat detail jurnal |
 | POST | /students | Menambahkan siswa ke kelas |
 | GET | /students | Melihat daftar siswa (opsional filter `?class_id=1`) |
 | POST | /teachers | Membuat profil guru dari akun role teacher |
@@ -111,3 +114,4 @@ python -m pytest -q
 - Setiap siswa memiliki NIS unik dan ditempatkan pada satu kelas. Penghapusan siswa dilakukan dengan menonaktifkan data, bukan menghapus permanen.
 - Profil guru terhubung ke satu akun dengan role teacher. NIP bersifat opsional dan unik jika diisi.
 - Riwayat petugas jurnal disimpan per periode tanggal. Periode untuk kelas yang sama tidak boleh bertumpang tindih; `end_date` boleh kosong untuk penugasan yang masih berjalan.
+- Satu kelas hanya memiliki satu jurnal per tanggal. Pembuatan jurnal memeriksa periode petugas dan aman diulang tanpa membuat jurnal duplikat. Jurnal baru berstatus `DRAFT`.

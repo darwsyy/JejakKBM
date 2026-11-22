@@ -1,16 +1,18 @@
 from datetime import date
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    ClassOfficerAssignment, ClassOfficerPeriod, Classroom, ScheduleSlot, ScheduleTeacherAssignment,
+    ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, ScheduleSlot, ScheduleTeacherAssignment,
     ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
     ClassOfficerResponse,
+    DailyJournalCreate,
+    DailyJournalResponse,
     ClassOfficerPeriodCreate,
     ClassOfficerPeriodResponse,
     ClassroomCreate,
@@ -855,3 +857,96 @@ def get_current_class_officer(
         user_id=user.id, username=user.username, full_name=user.full_name,
         start_date=period.start_date, end_date=period.end_date,
     )
+
+
+@app.post(
+    "/journals",
+    response_model=DailyJournalResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Daily Journals"],
+)
+def create_daily_journal(
+    data: DailyJournalCreate,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    # Satu kelas hanya memiliki satu jurnal untuk satu tanggal.
+    existing = db.query(DailyJournal).filter(
+        DailyJournal.class_id == data.class_id,
+        DailyJournal.journal_date == data.journal_date,
+    ).first()
+    if existing is not None:
+        response.status_code = status.HTTP_200_OK
+        return existing
+
+    classroom = db.query(Classroom).filter(Classroom.id == data.class_id).first()
+    if classroom is None:
+        raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+
+    officer = db.query(User).filter(User.id == data.officer_user_id).first()
+    if officer is None:
+        raise HTTPException(status_code=404, detail="Akun petugas tidak ditemukan.")
+    if officer.role != "class_officer" or not officer.is_active:
+        raise HTTPException(status_code=400, detail="Akun harus petugas kelas yang aktif.")
+
+    assignment = db.query(ClassOfficerPeriod).filter(
+        ClassOfficerPeriod.class_id == data.class_id,
+        ClassOfficerPeriod.user_id == data.officer_user_id,
+        ClassOfficerPeriod.start_date <= data.journal_date,
+    ).filter(
+        (ClassOfficerPeriod.end_date.is_(None))
+        | (ClassOfficerPeriod.end_date >= data.journal_date)
+    ).first()
+    if assignment is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Akun ini bukan petugas jurnal kelas pada tanggal tersebut.",
+        )
+
+    journal = DailyJournal(
+        class_id=data.class_id,
+        journal_date=data.journal_date,
+        officer_user_id=data.officer_user_id,
+        status="DRAFT",
+    )
+    db.add(journal)
+    try:
+        db.commit()
+        db.refresh(journal)
+    except IntegrityError:
+        db.rollback()
+        # Melindungi dari dua request yang membuat jurnal bersamaan.
+        journal = db.query(DailyJournal).filter(
+            DailyJournal.class_id == data.class_id,
+            DailyJournal.journal_date == data.journal_date,
+        ).first()
+        if journal is None:
+            raise HTTPException(status_code=409, detail="Jurnal gagal dibuat.")
+        response.status_code = status.HTTP_200_OK
+    return journal
+
+
+@app.get("/journals", response_model=list[DailyJournalResponse], tags=["Daily Journals"])
+def get_daily_journals(
+    class_id: int | None = None,
+    journal_date: date | None = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(DailyJournal)
+    if class_id is not None:
+        query = query.filter(DailyJournal.class_id == class_id)
+    if journal_date is not None:
+        query = query.filter(DailyJournal.journal_date == journal_date)
+    return query.order_by(DailyJournal.journal_date.desc(), DailyJournal.class_id).all()
+
+
+@app.get(
+    "/journals/{journal_id}",
+    response_model=DailyJournalResponse,
+    tags=["Daily Journals"],
+)
+def get_daily_journal(journal_id: int, db: Session = Depends(get_db)):
+    journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
+    if journal is None:
+        raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
+    return journal

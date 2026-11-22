@@ -635,3 +635,105 @@ def test_seed_demo_creates_sample_data_and_is_repeatable():
     finally:
         Base.metadata.drop_all(bind=test_engine)
         test_engine.dispose()
+
+
+def create_officer_period(client, class_id, user_id, start="2026-01-01", end=None):
+    return client.post(f"/classes/{class_id}/officer-periods", json={
+        "user_id": user_id, "start_date": start, "end_date": end
+    })
+
+
+def test_create_daily_journal_and_get_details(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    officer = create_user(client, "petugas1").json()
+    create_officer_period(client, classroom["id"], officer["id"])
+
+    response = client.post("/journals", json={
+        "class_id": classroom["id"],
+        "journal_date": "2026-11-23",
+        "officer_user_id": officer["id"],
+    })
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "DRAFT"
+    detail = client.get(f"/journals/{response.json()['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["class_id"] == classroom["id"]
+
+
+def test_daily_journal_creation_is_idempotent(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    officer = create_user(client, "petugas1").json()
+    create_officer_period(client, classroom["id"], officer["id"])
+    data = {
+        "class_id": classroom["id"],
+        "journal_date": "2026-11-23",
+        "officer_user_id": officer["id"],
+    }
+
+    first = client.post("/journals", json=data)
+    second = client.post("/journals", json=data)
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert first.json()["id"] == second.json()["id"]
+    assert len(client.get("/journals").json()) == 1
+
+
+def test_daily_journal_requires_current_class_officer(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    officer = create_user(client, "petugas1").json()
+    response = client.post("/journals", json={
+        "class_id": classroom["id"],
+        "journal_date": "2026-11-23",
+        "officer_user_id": officer["id"],
+    })
+    assert response.status_code == 403
+
+
+def test_daily_journal_rejects_invalid_class_or_user(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    teacher = create_user(client, "guru1", role="teacher").json()
+    invalid_role = client.post("/journals", json={
+        "class_id": classroom["id"], "journal_date": "2026-11-23",
+        "officer_user_id": teacher["id"],
+    })
+    missing_class = client.post("/journals", json={
+        "class_id": 999, "journal_date": "2026-11-23",
+        "officer_user_id": teacher["id"],
+    })
+    missing_user = client.post("/journals", json={
+        "class_id": classroom["id"], "journal_date": "2026-11-23",
+        "officer_user_id": 999,
+    })
+
+    assert invalid_role.status_code == 400
+    assert missing_class.status_code == 404
+    assert missing_user.status_code == 404
+
+
+def test_list_daily_journals_can_filter_by_class_and_date(client):
+    first_class = create_classroom(client, "X TKJ 1").json()
+    second_class = create_classroom(client, "X TKJ 2").json()
+    first_officer = create_user(client, "petugas1").json()
+    second_officer = create_user(client, "petugas2").json()
+    create_officer_period(client, first_class["id"], first_officer["id"])
+    create_officer_period(client, second_class["id"], second_officer["id"])
+
+    for classroom, officer, day in [
+        (first_class, first_officer, "2026-11-23"),
+        (second_class, second_officer, "2026-11-23"),
+        (first_class, first_officer, "2026-11-24"),
+    ]:
+        client.post("/journals", json={
+            "class_id": classroom["id"], "journal_date": day,
+            "officer_user_id": officer["id"],
+        })
+
+    assert len(client.get(f"/journals?class_id={first_class['id']}").json()) == 2
+    assert len(client.get("/journals?journal_date=2026-11-23").json()) == 2
+    assert len(client.get("/journals").json()) == 3
+
+
+def test_daily_journal_detail_returns_404_for_unknown_id(client):
+    assert client.get("/journals/999").status_code == 404
