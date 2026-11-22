@@ -329,3 +329,11 @@ class DutyRosterResponse(BaseModel):
     teacher_name: str
     username: str
     assigned_by_user_id: int
+
+
+class DailyDashboardResponse(BaseModel):
+    report_date: date
+    total_classes: int
+    total_journals: int
+    status_counts: dict[str, int]
+    missing_classes: list[str]

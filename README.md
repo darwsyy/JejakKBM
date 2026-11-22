@@ -160,3 +160,11 @@ python -m pytest -q
 - `DELETE /duty-rosters/{roster_id}?admin_user_id=1` menghapus penugasan dengan persetujuan akun admin aktif.
 - Seorang guru boleh mendapat beberapa tanggal piket, dan satu tanggal boleh memiliki beberapa guru piket. Guru yang memeriksa jurnal harus terdaftar pada tanggal jurnal tersebut.
 - Karena login belum dibuat, ID admin dan guru masih dikirim dalam request; ini validasi role sementara untuk pengembangan lokal.
+
+
+### Dashboard ringkasan harian
+
+- `GET /dashboard/daily` menampilkan ringkasan jurnal untuk tanggal hari ini.
+- Gunakan `GET /dashboard/daily?report_date=YYYY-MM-DD` untuk melihat tanggal tertentu.
+- Respons berisi jumlah seluruh kelas, jumlah jurnal yang dibuat, jumlah jurnal berdasarkan status (`DRAFT`, `SUBMITTED`, `RESUBMITTED`, `REVISION_REQUIRED`, `APPROVED`, `REJECTED`), serta nama kelas yang belum membuat jurnal pada tanggal tersebut.
+- Dashboard menghitung berdasarkan tanggal jurnal, bukan tanggal saat data diperiksa. Kelas tanpa jadwal tetap muncul dalam daftar jika belum memiliki jurnal.

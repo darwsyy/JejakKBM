@@ -10,6 +10,7 @@ from app.models import (
     ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
+    DailyDashboardResponse,
     ClassOfficerResponse,
     DailyJournalCreate,
     DailyJournalResponse,
@@ -952,6 +953,33 @@ def get_daily_journals(
     if journal_date is not None:
         query = query.filter(DailyJournal.journal_date == journal_date)
     return query.order_by(DailyJournal.journal_date.desc(), DailyJournal.class_id).all()
+
+
+@app.get("/dashboard/daily", response_model=DailyDashboardResponse, tags=["Dashboard"])
+def get_daily_dashboard(report_date: date | None = None, db: Session = Depends(get_db)):
+    selected_date = report_date or date.today()
+    classrooms = db.query(Classroom).order_by(Classroom.name).all()
+    journals = db.query(DailyJournal).filter(
+        DailyJournal.journal_date == selected_date
+    ).all()
+
+    status_names = ["DRAFT", "SUBMITTED", "RESUBMITTED", "REVISION_REQUIRED", "APPROVED", "REJECTED"]
+    status_counts = {name: 0 for name in status_names}
+    submitted_class_ids = set()
+    for journal in journals:
+        if journal.status in status_counts:
+            status_counts[journal.status] += 1
+        submitted_class_ids.add(journal.class_id)
+
+    missing_classes = [
+        classroom.name for classroom in classrooms
+        if classroom.id not in submitted_class_ids
+    ]
+    return DailyDashboardResponse(
+        report_date=selected_date, total_classes=len(classrooms),
+        total_journals=len(journals), status_counts=status_counts,
+        missing_classes=missing_classes,
+    )
 
 
 @app.get(

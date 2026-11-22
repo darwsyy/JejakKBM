@@ -1268,3 +1268,66 @@ def test_teacher_without_duty_roster_cannot_review(client):
         "reviewer_user_id": teacher["id"], "decision": "APPROVE",
     })
     assert response.status_code == 403
+
+
+
+def test_daily_dashboard_counts_journals_and_missing_classes(client):
+    first_class = create_classroom(client, "X TKJ 1").json()
+    second_class = create_classroom(client, "X TKJ 2").json()
+    third_class = create_classroom(client, "X TKJ 3").json()
+    first_officer = create_user(client, "dashboard_officer1").json()
+    second_officer = create_user(client, "dashboard_officer2").json()
+    create_officer_period(client, first_class["id"], first_officer["id"])
+    create_officer_period(client, second_class["id"], second_officer["id"])
+
+    draft = client.post("/journals", json={
+        "class_id": first_class["id"], "journal_date": "2026-11-23",
+        "officer_user_id": first_officer["id"],
+    })
+    submitted = client.post("/journals", json={
+        "class_id": second_class["id"], "journal_date": "2026-11-23",
+        "officer_user_id": second_officer["id"],
+    })
+    assert draft.status_code == 201
+    assert submitted.status_code == 201
+    sent = client.post(f"/journals/{submitted.json()['id']}/submit", json={
+        "officer_user_id": second_officer["id"],
+    })
+    assert sent.status_code == 200
+
+    admin = create_user(client, "dashboard_admin", role="admin").json()
+    teacher = create_user(client, "dashboard_teacher", role="teacher").json()
+    roster = client.post("/duty-rosters", json={
+        "duty_date": "2026-11-23", "teacher_user_id": teacher["id"],
+        "assigned_by_user_id": admin["id"],
+    })
+    assert roster.status_code == 201
+    approved = client.post(f"/journals/{submitted.json()['id']}/review", json={
+        "reviewer_user_id": teacher["id"], "decision": "APPROVE",
+    })
+    assert approved.status_code == 201
+
+    response = client.get("/dashboard/daily?report_date=2026-11-23")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["total_classes"] == 3
+    assert result["total_journals"] == 2
+    assert result["status_counts"]["DRAFT"] == 1
+    assert result["status_counts"]["APPROVED"] == 1
+    assert result["status_counts"]["SUBMITTED"] == 0
+    assert result["missing_classes"] == ["X TKJ 3"]
+
+
+def test_daily_dashboard_uses_today_by_default_and_handles_empty_date(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    response = client.get("/dashboard/daily")
+    assert response.status_code == 200
+    assert response.json()["report_date"]
+    assert response.json()["total_classes"] == 1
+    assert response.json()["total_journals"] == 0
+    assert response.json()["missing_classes"] == [classroom["name"]]
+
+    empty_day = client.get("/dashboard/daily?report_date=2026-12-31")
+    assert empty_day.status_code == 200
+    assert empty_day.json()["total_journals"] == 0
+    assert empty_day.json()["status_counts"]["DRAFT"] == 0
