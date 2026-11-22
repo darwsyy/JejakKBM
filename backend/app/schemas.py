@@ -239,3 +239,31 @@ class AttendanceResponse(BaseModel):
     teacher_name: str
     attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "ABSENT"]
     recorded_at: datetime
+
+
+class AttendanceBatchItem(BaseModel):
+    student_id: int = Field(ge=1)
+    attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "ABSENT"]
+
+
+class AttendanceBatchCreate(BaseModel):
+    slot_id: int = Field(ge=1)
+    teacher_id: int = Field(ge=1)
+    records: list[AttendanceBatchItem] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_students(self):
+        student_ids = [item.student_id for item in self.records]
+        if len(student_ids) != len(set(student_ids)):
+            raise ValueError("Siswa yang sama tidak boleh dikirim lebih dari sekali.")
+        return self
+
+
+class AttendanceCompletenessResponse(BaseModel):
+    session_id: int
+    slot_id: int
+    jp_number: int
+    total_students: int
+    recorded_count: int
+    missing_count: int
+    missing_students: list[dict]

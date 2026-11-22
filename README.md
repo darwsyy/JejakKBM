@@ -121,3 +121,9 @@ python -m pytest -q
 - Satu kelas hanya memiliki satu jurnal per tanggal. Pembuatan jurnal memeriksa periode petugas dan aman diulang tanpa membuat jurnal duplikat. Jurnal baru berstatus `DRAFT`.
 - Sesi pembelajaran hanya memakai slot `LESSON` yang berurutan pada hari jurnal, dengan mata pelajaran dan guru jadwal yang sama. Waktu aktual serta materi dicatat pada sesi.
 - Absensi disimpan per siswa dan per JP. Hanya guru pengajar sesi yang dapat mengisi; siswa harus berasal dari kelas jurnal. Status sementara: `PRESENT`, `SICK`, `PERMITTED`, `ABSENT`.
+
+
+### Absensi massal dan kelengkapan
+
+- `POST /journal-sessions/{session_id}/attendance/batch` menerima satu `slot_id`, `teacher_id`, dan daftar `records` berisi `student_id` serta `attendance_status`. Semua siswa divalidasi sebelum disimpan; jika satu data tidak valid, tidak ada catatan yang disimpan.
+- `GET /journal-sessions/{session_id}/attendance/completeness` menampilkan jumlah siswa aktif, jumlah yang sudah dicatat, dan daftar yang belum dicatat untuk setiap JP. Tambahkan query `slot_id` untuk memeriksa satu JP saja.

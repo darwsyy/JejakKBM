@@ -932,3 +932,98 @@ def test_attendance_rejects_invalid_status_and_unknown_session(client):
     })
     assert invalid.status_code == 422
     assert missing.status_code == 404
+
+
+
+def test_batch_attendance_records_multiple_students(client):
+    session, teacher, first_student, slot_ids = setup_session_with_student(client)
+    second_student = client.post("/students", json={
+        "nis": "S002", "full_name": "Siswa Dua", "class_id": 1,
+    }).json()
+    response = client.post(f"/journal-sessions/{session['id']}/attendance/batch", json={
+        "slot_id": slot_ids[0], "teacher_id": teacher["id"],
+        "records": [
+            {"student_id": first_student["id"], "attendance_status": "PRESENT"},
+            {"student_id": second_student["id"], "attendance_status": "SICK"},
+        ],
+    })
+    assert response.status_code == 201
+    assert len(response.json()) == 2
+    assert {item["attendance_status"] for item in response.json()} == {"PRESENT", "SICK"}
+
+
+def test_batch_attendance_rejects_duplicate_students_in_payload(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    response = client.post(f"/journal-sessions/{session['id']}/attendance/batch", json={
+        "slot_id": slot_ids[0], "teacher_id": teacher["id"],
+        "records": [
+            {"student_id": student["id"], "attendance_status": "PRESENT"},
+            {"student_id": student["id"], "attendance_status": "ABSENT"},
+        ],
+    })
+    assert response.status_code == 422
+
+
+def test_batch_attendance_rejects_wrong_class_without_partial_save(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    other_class = create_classroom(client, "X TKJ 2").json()
+    other_student = client.post("/students", json={
+        "nis": "S099", "full_name": "Siswa Lain", "class_id": other_class["id"],
+    }).json()
+    response = client.post(f"/journal-sessions/{session['id']}/attendance/batch", json={
+        "slot_id": slot_ids[0], "teacher_id": teacher["id"],
+        "records": [
+            {"student_id": student["id"], "attendance_status": "PRESENT"},
+            {"student_id": other_student["id"], "attendance_status": "ABSENT"},
+        ],
+    })
+    assert response.status_code == 400
+    assert client.get(f"/journal-sessions/{session['id']}/attendance").json() == []
+
+
+def test_batch_attendance_rejects_existing_records(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    data = {
+        "slot_id": slot_ids[0], "teacher_id": teacher["id"],
+        "records": [{"student_id": student["id"], "attendance_status": "PRESENT"}],
+    }
+    first = client.post(f"/journal-sessions/{session['id']}/attendance/batch", json=data)
+    second = client.post(f"/journal-sessions/{session['id']}/attendance/batch", json=data)
+    assert first.status_code == 201
+    assert second.status_code == 409
+
+
+def test_attendance_completeness_lists_missing_students(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    second_student = client.post("/students", json={
+        "nis": "S002", "full_name": "Siswa Dua", "class_id": 1,
+    }).json()
+    client.post(f"/journal-sessions/{session['id']}/attendance", json={
+        "slot_id": slot_ids[0], "student_id": student["id"],
+        "teacher_id": teacher["id"], "attendance_status": "PRESENT",
+    })
+    response = client.get(f"/journal-sessions/{session['id']}/attendance/completeness")
+    assert response.status_code == 200
+    assert response.json()[0]["recorded_count"] == 1
+    assert response.json()[0]["missing_count"] == 1
+    assert response.json()[0]["missing_students"][0]["student_id"] == second_student["id"]
+    assert response.json()[1]["missing_count"] == 2
+
+
+def test_attendance_completeness_can_filter_one_jp(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    response = client.get(
+        f"/journal-sessions/{session['id']}/attendance/completeness?slot_id={slot_ids[1]}"
+    )
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["jp_number"] == 3
+
+
+def test_attendance_completeness_rejects_unknown_session_or_jp(client):
+    assert client.get("/journal-sessions/999/attendance/completeness").status_code == 404
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    response = client.get(
+        f"/journal-sessions/{session['id']}/attendance/completeness?slot_id=999"
+    )
+    assert response.status_code == 400
