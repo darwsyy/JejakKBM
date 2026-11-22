@@ -30,3 +30,11 @@ class ClassroomResponse(BaseModel):
     academic_year: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ClassOfficerResponse(BaseModel):
+    class_id: int
+    class_name: str
+    user_id: int
+    username: str
+    full_name: str

@@ -36,7 +36,7 @@ Jika environment sudah pernah dibuat, tidak perlu membuatnya lagi. Cukup aktifka
 python backend/create_db.py
 ```
 
-Perintah tersebut membuat file `jejak_kbm.db` dan tabel `users` serta `classes` jika belum tersedia.
+Perintah tersebut membuat file `jejak_kbm.db` dan tabel `users`, `classes`, serta `class_officer_assignments` jika belum tersedia.
 
 ## Menjalankan API
 
@@ -55,6 +55,8 @@ Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 | GET | /users | Melihat pengguna |
 | POST | /classes | Menambah kelas |
 | GET | /classes | Melihat kelas |
+| PUT | /classes/{class_id}/officer/{user_id} | Menetapkan petugas jurnal utama |
+| GET | /classes/{class_id}/officer | Melihat petugas jurnal utama kelas |
 
 ## Menjalankan tes
 
@@ -67,3 +69,4 @@ python -m pytest -q
 - Saat ini belum ada login atau pembatasan akses. Endpoint hanya untuk pengembangan lokal.
 - File database lokal tidak dimasukkan ke Git.
 - Jangan gunakan data pribadi siswa sungguhan untuk pengujian.
+- Penugasan petugas utama belum menyediakan fitur pergantian petugas.

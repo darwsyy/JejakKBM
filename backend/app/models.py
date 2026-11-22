@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -20,3 +20,19 @@ class Classroom(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     academic_year: Mapped[str] = mapped_column(String(20), nullable=False)
+
+
+class ClassOfficerAssignment(Base):
+    __tablename__ = "class_officer_assignments"
+
+    # class_id sebagai primary key: satu kelas hanya punya satu petugas utama.
+    class_id: Mapped[int] = mapped_column(
+        ForeignKey("classes.id"),
+        primary_key=True,
+    )
+    # unique=True: satu petugas hanya boleh ditugaskan ke satu kelas.
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"),
+        unique=True,
+        nullable=False,
+    )
