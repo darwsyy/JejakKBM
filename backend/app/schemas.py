@@ -293,3 +293,24 @@ class JournalReviewResponse(BaseModel):
     decision: Literal["APPROVE", "REQUEST_REVISION", "REJECT"]
     notes: str | None
     reviewed_at: datetime
+
+
+class JournalRevisionStart(BaseModel):
+    officer_user_id: int = Field(ge=1)
+
+
+class JournalSessionUpdate(BaseModel):
+    material: str = Field(min_length=3, max_length=1000)
+    actual_start_time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    actual_end_time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+    @model_validator(mode="after")
+    def validate_actual_time(self):
+        if datetime.strptime(self.actual_end_time, "%H:%M") <= datetime.strptime(self.actual_start_time, "%H:%M"):
+            raise ValueError("Waktu selesai harus setelah waktu mulai.")
+        return self
+
+
+class AttendanceUpdate(BaseModel):
+    teacher_id: int = Field(ge=1)
+    attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "ABSENT"]

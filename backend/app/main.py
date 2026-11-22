@@ -16,6 +16,9 @@ from app.schemas import (
     JournalSubmitRequest,
     JournalReviewCreate,
     JournalReviewResponse,
+    JournalRevisionStart,
+    JournalSessionUpdate,
+    AttendanceUpdate,
     JournalSessionCreate,
     JournalSessionResponse,
     AttendanceCreate,
@@ -1278,6 +1281,58 @@ def get_attendance_completeness(
     return results
 
 
+@app.post("/journals/{journal_id}/revision/start", response_model=DailyJournalResponse, tags=["Daily Journals"])
+def start_journal_revision(journal_id: int, data: JournalRevisionStart, db: Session = Depends(get_db)):
+    journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
+    if journal is None:
+        raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
+    if journal.status != "REVISION_REQUIRED":
+        raise HTTPException(status_code=400, detail="Jurnal tidak sedang menunggu revisi.")
+    if data.officer_user_id != journal.officer_user_id:
+        raise HTTPException(status_code=403, detail="Hanya petugas jurnal yang ditetapkan yang dapat memperbaiki.")
+    journal.status = "DRAFT"
+    db.commit()
+    db.refresh(journal)
+    return journal
+
+
+@app.put("/journal-sessions/{session_id}", response_model=JournalSessionResponse, tags=["Journal Sessions"])
+def update_journal_session(session_id: int, data: JournalSessionUpdate, db: Session = Depends(get_db)):
+    session = db.query(JournalSession).filter(JournalSession.id == session_id).first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Sesi tidak ditemukan.")
+    journal = db.query(DailyJournal).filter(DailyJournal.id == session.journal_id).first()
+    if journal.status != "DRAFT":
+        raise HTTPException(status_code=400, detail="Sesi hanya dapat diperbaiki saat jurnal DRAFT.")
+    session.material = data.material.strip()
+    session.actual_start_time = data.actual_start_time
+    session.actual_end_time = data.actual_end_time
+    db.commit()
+    db.refresh(session)
+    return build_journal_session_response(db, session)
+
+
+@app.put("/attendance/{attendance_id}", response_model=AttendanceResponse, tags=["Attendance"])
+def update_attendance(attendance_id: int, data: AttendanceUpdate, db: Session = Depends(get_db)):
+    record = db.query(AttendanceRecord).filter(AttendanceRecord.id == attendance_id).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Catatan absensi tidak ditemukan.")
+    session = db.query(JournalSession).filter(JournalSession.id == record.session_id).first()
+    journal = db.query(DailyJournal).filter(DailyJournal.id == session.journal_id).first()
+    if journal.status != "DRAFT":
+        raise HTTPException(status_code=400, detail="Absensi hanya dapat diperbaiki saat jurnal DRAFT.")
+    if data.teacher_id != session.teacher_id:
+        raise HTTPException(status_code=403, detail="Hanya guru pengajar sesi ini yang dapat memperbaiki absensi.")
+    teacher = db.query(User).filter(User.id == data.teacher_id).first()
+    if teacher is None or teacher.role != "teacher" or not teacher.is_active:
+        raise HTTPException(status_code=403, detail="Akun pengisi harus guru yang aktif.")
+    record.teacher_id = data.teacher_id
+    record.attendance_status = data.attendance_status
+    db.commit()
+    db.refresh(record)
+    return build_attendance_response(db, record)
+
+
 @app.post(
     "/journals/{journal_id}/submit",
     response_model=DailyJournalResponse,
@@ -1356,7 +1411,11 @@ def submit_daily_journal(
                     detail=f"Absensi JP {slot.jp_number} belum lengkap: {missing_count} siswa belum dicatat.",
                 )
 
-    journal.status = "SUBMITTED"
+    previous_revision = db.query(JournalReview).filter(
+        JournalReview.journal_id == journal_id,
+        JournalReview.decision == "REQUEST_REVISION",
+    ).first()
+    journal.status = "RESUBMITTED" if previous_revision is not None else "SUBMITTED"
     db.commit()
     db.refresh(journal)
     return journal

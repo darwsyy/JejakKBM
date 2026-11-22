@@ -1145,3 +1145,46 @@ def test_review_rejects_non_teacher_and_invalid_journal_state(client):
         "reviewer_user_id": teacher["id"], "decision": "REJECT", "notes": "Tidak sesuai.",
     })
     assert repeated.status_code == 400
+
+
+
+def test_journal_revision_cycle_and_resubmission(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+    for slot_id in slot_ids:
+        response = client.post(f"/journal-sessions/{session['id']}/attendance", json={
+            "slot_id": slot_id, "student_id": student["id"],
+            "teacher_id": teacher["id"], "attendance_status": "PRESENT",
+        })
+        assert response.status_code == 201
+
+    journal_id = session["journal_id"]
+    submitted = client.post(f"/journals/{journal_id}/submit", json={"officer_user_id": 1})
+    assert submitted.status_code == 200
+    revision = client.post(f"/journals/{journal_id}/review", json={
+        "reviewer_user_id": teacher["id"], "decision": "REQUEST_REVISION",
+        "notes": "Perbaiki materi dan status kehadiran.",
+    })
+    assert revision.status_code == 201
+    assert client.get(f"/journals/{journal_id}").json()["status"] == "REVISION_REQUIRED"
+
+    started = client.post(f"/journals/{journal_id}/revision/start", json={"officer_user_id": 1})
+    assert started.status_code == 200
+    assert started.json()["status"] == "DRAFT"
+
+    updated_session = client.put(f"/journal-sessions/{session['id']}", json={
+        "material": "Materi yang sudah diperbaiki",
+        "actual_start_time": "08:35", "actual_end_time": "09:50",
+    })
+    assert updated_session.status_code == 200
+    attendance = client.get(f"/journal-sessions/{session['id']}/attendance").json()
+    updated_attendance = client.put(f"/attendance/{attendance[0]['id']}", json={
+        "teacher_id": teacher["id"], "attendance_status": "SICK",
+    })
+    assert updated_attendance.status_code == 200
+    assert updated_attendance.json()["attendance_status"] == "SICK"
+
+    resubmitted = client.post(f"/journals/{journal_id}/submit", json={"officer_user_id": 1})
+    assert resubmitted.status_code == 200
+    assert resubmitted.json()["status"] == "RESUBMITTED"
+    assert any(item["id"] == journal_id for item in client.get("/reviews/inbox").json())
+    assert len(client.get(f"/journals/{journal_id}/reviews").json()) == 1

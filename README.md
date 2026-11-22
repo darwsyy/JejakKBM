@@ -143,3 +143,11 @@ python -m pytest -q
 - `POST /journals/{journal_id}/review` menerima `reviewer_user_id`, `decision` (`APPROVE`, `REQUEST_REVISION`, atau `REJECT`), dan `notes`. Catatan wajib untuk revisi atau penolakan.
 - `GET /journals/{journal_id}/reviews` menampilkan riwayat pemeriksaan.
 - Keputusan mengubah status jurnal menjadi `APPROVED`, `REVISION_REQUIRED`, atau `REJECTED`. Saat ini pemeriksa divalidasi sebagai akun guru aktif; penugasan guru piket khusus dan alur edit/resubmit akan dibuat pada tahap berikutnya.
+
+
+### Revisi dan pengiriman ulang jurnal
+
+- `POST /journals/{journal_id}/revision/start` menerima `officer_user_id` dan mengubah jurnal `REVISION_REQUIRED` menjadi `DRAFT` agar petugas dapat memperbaiki data.
+- `PUT /journal-sessions/{session_id}` memperbaiki materi dan waktu aktual sesi saat jurnal `DRAFT`.
+- `PUT /attendance/{attendance_id}` memperbaiki status absensi saat jurnal `DRAFT`, hanya oleh guru pengajar sesi.
+- Setelah diperbaiki, gunakan kembali `POST /journals/{journal_id}/submit`. Jika jurnal pernah diminta revisi, status berubah menjadi `RESUBMITTED` dan masuk kembali ke antrean pemeriksaan. Riwayat pemeriksaan sebelumnya tetap disimpan.
