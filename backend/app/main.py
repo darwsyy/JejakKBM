@@ -1,14 +1,18 @@
+from datetime import date
+
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    ClassOfficerAssignment, Classroom, ScheduleSlot, ScheduleTeacherAssignment,
+    ClassOfficerAssignment, ClassOfficerPeriod, Classroom, ScheduleSlot, ScheduleTeacherAssignment,
     ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
     ClassOfficerResponse,
+    ClassOfficerPeriodCreate,
+    ClassOfficerPeriodResponse,
     ClassroomCreate,
     ClassroomResponse,
     UserCreate,
@@ -733,4 +737,121 @@ def deactivate_teacher(teacher_id: int, db: Session = Depends(get_db)):
     return TeacherResponse(
         id=teacher.id, user_id=user.id, username=user.username,
         full_name=user.full_name, nip=teacher.nip, is_active=teacher.is_active,
+    )
+
+
+@app.post(
+    "/classes/{class_id}/officer-periods",
+    response_model=ClassOfficerPeriodResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Class Officer"],
+)
+def create_class_officer_period(
+    class_id: int,
+    data: ClassOfficerPeriodCreate,
+    db: Session = Depends(get_db),
+):
+    classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
+    if classroom is None:
+        raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+
+    user = db.query(User).filter(User.id == data.user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
+    if user.role != "class_officer":
+        raise HTTPException(status_code=400, detail="Pengguna harus memiliki role class_officer.")
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Akun petugas tidak aktif.")
+
+    # Cek apakah tanggal penugasan bertabrakan dengan periode lama di kelas ini.
+    existing_periods = db.query(ClassOfficerPeriod).filter(
+        ClassOfficerPeriod.class_id == class_id
+    ).all()
+    for period in existing_periods:
+        new_ends_after_old_starts = (
+            data.end_date is None or period.start_date <= data.end_date
+        )
+        old_ends_after_new_starts = (
+            period.end_date is None or period.end_date >= data.start_date
+        )
+        if new_ends_after_old_starts and old_ends_after_new_starts:
+            raise HTTPException(
+                status_code=409,
+                detail="Periode petugas bertabrakan dengan penugasan yang sudah ada.",
+            )
+
+    assignment = ClassOfficerPeriod(
+        class_id=class_id,
+        user_id=data.user_id,
+        start_date=data.start_date,
+        end_date=data.end_date,
+    )
+    db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+
+    return ClassOfficerPeriodResponse(
+        id=assignment.id, class_id=classroom.id, class_name=classroom.name,
+        user_id=user.id, username=user.username, full_name=user.full_name,
+        start_date=assignment.start_date, end_date=assignment.end_date,
+    )
+
+
+@app.get(
+    "/classes/{class_id}/officer-periods",
+    response_model=list[ClassOfficerPeriodResponse],
+    tags=["Class Officer"],
+)
+def get_class_officer_periods(class_id: int, db: Session = Depends(get_db)):
+    classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
+    if classroom is None:
+        raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+
+    records = (
+        db.query(ClassOfficerPeriod, User)
+        .join(User, ClassOfficerPeriod.user_id == User.id)
+        .filter(ClassOfficerPeriod.class_id == class_id)
+        .order_by(ClassOfficerPeriod.start_date)
+        .all()
+    )
+    return [
+        ClassOfficerPeriodResponse(
+            id=period.id, class_id=classroom.id, class_name=classroom.name,
+            user_id=user.id, username=user.username, full_name=user.full_name,
+            start_date=period.start_date, end_date=period.end_date,
+        )
+        for period, user in records
+    ]
+
+
+@app.get(
+    "/classes/{class_id}/officer-current",
+    response_model=ClassOfficerPeriodResponse,
+    tags=["Class Officer"],
+)
+def get_current_class_officer(
+    class_id: int,
+    on_date: date | None = None,
+    db: Session = Depends(get_db),
+):
+    classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
+    if classroom is None:
+        raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+
+    selected_date = on_date or date.today()
+    period = db.query(ClassOfficerPeriod).filter(
+        ClassOfficerPeriod.class_id == class_id,
+        ClassOfficerPeriod.start_date <= selected_date,
+    ).filter(
+        (ClassOfficerPeriod.end_date.is_(None))
+        | (ClassOfficerPeriod.end_date >= selected_date)
+    ).first()
+    if period is None:
+        raise HTTPException(status_code=404, detail="Tidak ada petugas untuk tanggal tersebut.")
+
+    user = db.query(User).filter(User.id == period.user_id).first()
+    return ClassOfficerPeriodResponse(
+        id=period.id, class_id=classroom.id, class_name=classroom.name,
+        user_id=user.id, username=user.username, full_name=user.full_name,
+        start_date=period.start_date, end_date=period.end_date,
     )

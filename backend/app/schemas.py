@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -148,3 +148,26 @@ class TeacherResponse(BaseModel):
     full_name: str
     nip: str | None
     is_active: bool
+
+
+class ClassOfficerPeriodCreate(BaseModel):
+    user_id: int = Field(ge=1)
+    start_date: date
+    end_date: date | None = None
+
+    @model_validator(mode="after")
+    def validate_period(self):
+        if self.end_date is not None and self.end_date < self.start_date:
+            raise ValueError("Tanggal akhir tidak boleh sebelum tanggal mulai.")
+        return self
+
+
+class ClassOfficerPeriodResponse(BaseModel):
+    id: int
+    class_id: int
+    class_name: str
+    user_id: int
+    username: str
+    full_name: str
+    start_date: date
+    end_date: date | None

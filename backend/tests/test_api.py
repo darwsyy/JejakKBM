@@ -526,3 +526,79 @@ def test_teacher_profile_can_be_updated_and_deactivated(client):
 def test_teacher_profile_endpoints_reject_unknown_id(client):
     assert client.put("/teachers/999", json={"nip": "123"}).status_code == 404
     assert client.delete("/teachers/999").status_code == 404
+
+
+def test_class_officer_period_history_and_current_lookup(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    first_user = create_user(client, "petugas1", role="class_officer").json()
+    second_user = create_user(client, "petugas2", role="class_officer").json()
+
+    first = client.post(f"/classes/{classroom['id']}/officer-periods", json={
+        "user_id": first_user["id"],
+        "start_date": "2026-07-01",
+        "end_date": "2026-12-31",
+    })
+    second = client.post(f"/classes/{classroom['id']}/officer-periods", json={
+        "user_id": second_user["id"],
+        "start_date": "2027-01-01",
+        "end_date": None,
+    })
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    history = client.get(f"/classes/{classroom['id']}/officer-periods")
+    assert len(history.json()) == 2
+    assert history.json()[0]["username"] == "petugas1"
+    current = client.get(
+        f"/classes/{classroom['id']}/officer-current?on_date=2027-02-01"
+    )
+    assert current.status_code == 200
+    assert current.json()["username"] == "petugas2"
+
+
+def test_class_officer_period_rejects_overlapping_dates(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    first_user = create_user(client, "petugas1", role="class_officer").json()
+    second_user = create_user(client, "petugas2", role="class_officer").json()
+    first = client.post(f"/classes/{classroom['id']}/officer-periods", json={
+        "user_id": first_user["id"], "start_date": "2026-07-01", "end_date": "2026-12-31"
+    })
+    overlap = client.post(f"/classes/{classroom['id']}/officer-periods", json={
+        "user_id": second_user["id"], "start_date": "2026-12-01", "end_date": None
+    })
+
+    assert first.status_code == 201
+    assert overlap.status_code == 409
+
+
+def test_class_officer_period_requires_valid_user_and_class(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    teacher = create_user(client, "guru1", role="teacher").json()
+    invalid_role = client.post(f"/classes/{classroom['id']}/officer-periods", json={
+        "user_id": teacher["id"], "start_date": "2026-07-01"
+    })
+    missing_class = client.post("/classes/999/officer-periods", json={
+        "user_id": teacher["id"], "start_date": "2026-07-01"
+    })
+    missing_user = client.post(f"/classes/{classroom['id']}/officer-periods", json={
+        "user_id": 999, "start_date": "2026-07-01"
+    })
+
+    assert invalid_role.status_code == 400
+    assert missing_class.status_code == 404
+    assert missing_user.status_code == 404
+
+
+def test_class_officer_period_rejects_end_date_before_start_date(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    user = create_user(client, "petugas1", role="class_officer").json()
+    response = client.post(f"/classes/{classroom['id']}/officer-periods", json={
+        "user_id": user["id"], "start_date": "2026-12-31", "end_date": "2026-07-01"
+    })
+    assert response.status_code == 422
+
+
+def test_class_officer_current_lookup_returns_not_found_when_unassigned(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    response = client.get(f"/classes/{classroom['id']}/officer-current?on_date=2026-07-01")
+    assert response.status_code == 404

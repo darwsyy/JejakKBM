@@ -70,6 +70,9 @@ Dokumentasi API tersedia di http://127.0.0.1:8000/docs.
 | GET | /students | Melihat daftar siswa (opsional filter `?class_id=1`) |
 | POST | /teachers | Membuat profil guru dari akun role teacher |
 | GET | /teachers | Melihat daftar profil guru |
+| POST | /classes/{class_id}/officer-periods | Menambahkan periode petugas jurnal |
+| GET | /classes/{class_id}/officer-periods | Melihat riwayat petugas kelas |
+| GET | /classes/{class_id}/officer-current | Melihat petugas pada tanggal tertentu (`?on_date=YYYY-MM-DD`) |
 | PUT | /teachers/{teacher_id} | Mengubah NIP guru |
 | DELETE | /teachers/{teacher_id} | Menonaktifkan profil guru |
 | PUT | /students/{student_id} | Mengubah data atau kelas siswa |
@@ -96,3 +99,4 @@ python -m pytest -q
 - Penugasan mata pelajaran hanya berlaku untuk slot bertipe LESSON. Satu slot memiliki maksimal satu mata pelajaran.
 - Setiap siswa memiliki NIS unik dan ditempatkan pada satu kelas. Penghapusan siswa dilakukan dengan menonaktifkan data, bukan menghapus permanen.
 - Profil guru terhubung ke satu akun dengan role teacher. NIP bersifat opsional dan unik jika diisi.
+- Riwayat petugas jurnal disimpan per periode tanggal. Periode untuk kelas yang sama tidak boleh bertumpang tindih; `end_date` boleh kosong untuk penugasan yang masih berjalan.

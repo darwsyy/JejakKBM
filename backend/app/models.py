@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -123,3 +123,13 @@ class Teacher(Base):
     )
     nip: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class ClassOfficerPeriod(Base):
+    __tablename__ = "class_officer_periods"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    start_date: Mapped[object] = mapped_column(Date, nullable=False)
+    end_date: Mapped[object | None] = mapped_column(Date, nullable=True)
