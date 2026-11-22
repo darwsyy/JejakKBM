@@ -223,7 +223,7 @@ $env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
 - Laporan hanya berlaku untuk slot `LESSON` yang memiliki guru terjadwal dan belum memiliki sesi pembelajaran.
 - Satu JP hanya dapat memiliki satu laporan ketidakhadiran pada jurnal yang sama.
 - `GET /journals/{journal_id}/absence-reports` menampilkan semua laporan untuk jurnal tersebut.
-- Identitas pelapor saat ini masih dikirim melalui ID karena fitur login belum dibuat.
+- Identitas pelapor diambil dari Bearer token; ID petugas pada request harus cocok dengan akun yang sedang login.
 
 
 ### Notifikasi dalam aplikasi
@@ -234,4 +234,19 @@ $env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
 - `GET /notifications?user_id=1` menampilkan notifikasi pengguna. Tambahkan `&unread_only=true` untuk hanya melihat yang belum dibaca.
 - `PUT /notifications/{notification_id}/read?user_id=1` menandai notifikasi sebagai sudah dibaca. Hanya penerima yang boleh mengubah status baca.
 - Notifikasi disimpan di database lokal. Push notification ke HP belum dibuat karena aplikasi mobile belum tersedia.
-- `user_id` masih dikirim melalui URL karena login belum dibuat; pembatasan ini hanya untuk pengembangan lokal.
+- `user_id` pada URL harus sama dengan ID dari Bearer token. Pengguna tidak dapat membaca atau mengubah notifikasi milik akun lain.
+
+
+### Jadwal harian dan validasi jadwal
+
+- `GET /classes/{class_id}/daily-schedule?on_date=YYYY-MM-DD` menampilkan slot jadwal kelas pada tanggal yang dipilih, guru terjadwal, guru yang benar-benar mengajar, dan status jurnal.
+- Saat membuat atau mengubah slot, backend menolak waktu yang bertabrakan dengan slot lain pada kelas dan hari yang sama.
+- Dua slot yang waktunya tepat bersebelahan tetap diperbolehkan, misalnya 08:30–09:15 dan 09:15–10:00.
+- Jadwal khusus seperti Apel, Kokurikuler, Istirahat, dan kegiatan lain dimasukkan sebagai tipe slot yang sesuai. Jadwal rutin sekolah diatur melalui slot per hari.
+
+### Laporan administrasi
+
+- `GET /reports/attendance?class_id=1&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` menampilkan rekap status absensi siswa untuk satu kelas.
+- `GET /reports/attendance.csv?class_id=1&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` mengunduh rekap yang sama dalam format CSV.
+- Kedua laporan hanya dapat dibuka oleh akun admin.
+- Rentang laporan maksimal 366 hari agar permintaan tetap ringan.

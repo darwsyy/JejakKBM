@@ -381,6 +381,30 @@ def get_class_officer(class_id: int, db: Session = Depends(get_db)):
     )
 
 
+def check_schedule_overlap(
+    db: Session,
+    class_id: int,
+    day_of_week: str,
+    start_time: str,
+    end_time: str,
+    exclude_slot_id: int | None = None,
+):
+    query = db.query(ScheduleSlot).filter(
+        ScheduleSlot.class_id == class_id,
+        ScheduleSlot.day_of_week == day_of_week,
+        ScheduleSlot.start_time < end_time,
+        ScheduleSlot.end_time > start_time,
+    )
+    if exclude_slot_id is not None:
+        query = query.filter(ScheduleSlot.id != exclude_slot_id)
+
+    if query.first() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Waktu jadwal bertabrakan dengan slot lain pada hari yang sama.",
+        )
+
+
 @app.post(
     "/classes/{class_id}/schedule-slots",
     response_model=ScheduleSlotResponse,
@@ -399,6 +423,9 @@ def create_schedule_slot(
             detail="Kelas tidak ditemukan.",
         )
 
+    check_schedule_overlap(
+        db, class_id, data.day_of_week, data.start_time, data.end_time
+    )
     slot = ScheduleSlot(class_id=class_id, **data.model_dump())
     db.add(slot)
 
@@ -467,6 +494,15 @@ def update_schedule_slot(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Slot jadwal tidak ditemukan.",
         )
+
+    check_schedule_overlap(
+        db,
+        slot.class_id,
+        data.day_of_week,
+        data.start_time,
+        data.end_time,
+        exclude_slot_id=slot_id,
+    )
 
     for field, value in data.model_dump().items():
         setattr(slot, field, value)

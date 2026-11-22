@@ -1888,3 +1888,60 @@ def test_attendance_report_rejects_invalid_date_range(client):
         "/reports/attendance?class_id=1&start_date=2026-11-24&end_date=2026-11-23"
     )
     assert response.status_code == 422
+
+
+
+def test_schedule_slot_rejects_overlapping_time(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    url = f"/classes/{classroom['id']}/schedule-slots"
+    first = {
+        "day_of_week": "Monday",
+        "slot_order": 1,
+        "jp_number": 1,
+        "start_time": "07:45",
+        "end_time": "08:30",
+        "slot_type": "LESSON",
+    }
+    overlap = {
+        **first,
+        "slot_order": 2,
+        "jp_number": 2,
+        "start_time": "08:15",
+        "end_time": "09:00",
+    }
+    adjacent = {
+        **first,
+        "slot_order": 2,
+        "jp_number": 2,
+        "start_time": "08:30",
+        "end_time": "09:15",
+    }
+
+    assert client.post(url, json=first).status_code == 201
+    assert client.post(url, json=overlap).status_code == 409
+    assert client.post(url, json=adjacent).status_code == 201
+
+
+def test_schedule_slot_update_rejects_overlap_but_allows_same_slot(client):
+    classroom = create_classroom(client, "X TKJ 1").json()
+    url = f"/classes/{classroom['id']}/schedule-slots"
+    first = client.post(url, json={
+        "day_of_week": "Monday", "slot_order": 1, "jp_number": 1,
+        "start_time": "07:45", "end_time": "08:30", "slot_type": "LESSON",
+    }).json()
+    second = client.post(url, json={
+        "day_of_week": "Monday", "slot_order": 2, "jp_number": 2,
+        "start_time": "08:30", "end_time": "09:15", "slot_type": "LESSON",
+    }).json()
+
+    same_slot = client.put(f"/schedule-slots/{first['id']}", json={
+        "day_of_week": "Monday", "slot_order": 1, "jp_number": 1,
+        "start_time": "07:45", "end_time": "08:30", "slot_type": "LESSON",
+    })
+    overlap = client.put(f"/schedule-slots/{second['id']}", json={
+        "day_of_week": "Monday", "slot_order": 2, "jp_number": 2,
+        "start_time": "08:00", "end_time": "08:45", "slot_type": "LESSON",
+    })
+
+    assert same_slot.status_code == 200
+    assert overlap.status_code == 409
