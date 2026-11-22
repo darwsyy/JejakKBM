@@ -3,7 +3,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ClassOfficerAssignment, Classroom, ScheduleSlot, ScheduleTeacherAssignment, User
+from app.models import (
+    ClassOfficerAssignment, Classroom, ScheduleSlot, ScheduleTeacherAssignment,
+    ScheduleSubjectAssignment, Subject, User,
+)
 from app.schemas import (
     ClassOfficerResponse,
     ClassroomCreate,
@@ -14,6 +17,9 @@ from app.schemas import (
     ScheduleSlotResponse,
     ScheduleSlotUpdate,
     ScheduleTeacherResponse,
+    ScheduleSubjectResponse,
+    SubjectCreate,
+    SubjectResponse,
 )
 
 app = FastAPI(
@@ -289,6 +295,12 @@ def update_schedule_slot(
         if assignment is not None:
             db.delete(assignment)
 
+        subject_assignment = db.query(ScheduleSubjectAssignment).filter(
+            ScheduleSubjectAssignment.slot_id == slot_id
+        ).first()
+        if subject_assignment is not None:
+            db.delete(subject_assignment)
+
     try:
         db.commit()
         db.refresh(slot)
@@ -406,5 +418,121 @@ def delete_schedule_slot(slot_id: int, db: Session = Depends(get_db)):
     if assignment is not None:
         db.delete(assignment)
 
+    subject_assignment = db.query(ScheduleSubjectAssignment).filter(
+        ScheduleSubjectAssignment.slot_id == slot_id
+    ).first()
+    if subject_assignment is not None:
+        db.delete(subject_assignment)
+
     db.delete(slot)
+    db.commit()
+
+
+@app.post(
+    "/subjects",
+    response_model=SubjectResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Subjects"],
+)
+def create_subject(data: SubjectCreate, db: Session = Depends(get_db)):
+    subject = Subject(name=data.name.strip())
+    if len(subject.name) < 2:
+        raise HTTPException(status_code=422, detail="Nama mata pelajaran minimal 2 karakter.")
+
+    db.add(subject)
+    try:
+        db.commit()
+        db.refresh(subject)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Mata pelajaran sudah terdaftar.",
+        )
+    return subject
+
+
+@app.get("/subjects", response_model=list[SubjectResponse], tags=["Subjects"])
+def get_subjects(db: Session = Depends(get_db)):
+    return db.query(Subject).order_by(Subject.name).all()
+
+
+@app.put(
+    "/schedule-slots/{slot_id}/subject/{subject_id}",
+    response_model=ScheduleSubjectResponse,
+    tags=["Schedule"],
+)
+def assign_schedule_subject(
+    slot_id: int,
+    subject_id: int,
+    db: Session = Depends(get_db),
+):
+    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == slot_id).first()
+    if slot is None:
+        raise HTTPException(status_code=404, detail="Slot jadwal tidak ditemukan.")
+    if slot.slot_type != "LESSON":
+        raise HTTPException(status_code=400, detail="Mata pelajaran hanya dapat ditetapkan pada slot LESSON.")
+
+    subject = db.query(Subject).filter(Subject.id == subject_id).first()
+    if subject is None:
+        raise HTTPException(status_code=404, detail="Mata pelajaran tidak ditemukan.")
+
+    assignment = db.query(ScheduleSubjectAssignment).filter(
+        ScheduleSubjectAssignment.slot_id == slot_id
+    ).first()
+    if assignment is None:
+        assignment = ScheduleSubjectAssignment(slot_id=slot_id, subject_id=subject_id)
+        db.add(assignment)
+    else:
+        assignment.subject_id = subject_id
+
+    db.commit()
+    return ScheduleSubjectResponse(
+        slot_id=slot_id,
+        subject_id=subject.id,
+        subject_name=subject.name,
+    )
+
+
+@app.get(
+    "/schedule-slots/{slot_id}/subject",
+    response_model=ScheduleSubjectResponse,
+    tags=["Schedule"],
+)
+def get_schedule_subject(slot_id: int, db: Session = Depends(get_db)):
+    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == slot_id).first()
+    if slot is None:
+        raise HTTPException(status_code=404, detail="Slot jadwal tidak ditemukan.")
+
+    assignment = db.query(ScheduleSubjectAssignment).filter(
+        ScheduleSubjectAssignment.slot_id == slot_id
+    ).first()
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="Slot belum memiliki mata pelajaran.")
+
+    subject = db.query(Subject).filter(Subject.id == assignment.subject_id).first()
+    return ScheduleSubjectResponse(
+        slot_id=slot_id,
+        subject_id=subject.id,
+        subject_name=subject.name,
+    )
+
+
+@app.delete(
+    "/schedule-slots/{slot_id}/subject",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Schedule"],
+)
+def remove_schedule_subject(slot_id: int, db: Session = Depends(get_db)):
+    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == slot_id).first()
+    if slot is None:
+        raise HTTPException(status_code=404, detail="Slot jadwal tidak ditemukan.")
+
+    assignment = db.query(ScheduleSubjectAssignment).filter(
+        ScheduleSubjectAssignment.slot_id == slot_id
+    ).first()
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="Slot belum memiliki mata pelajaran.")
+
+    db.delete(assignment)
     db.commit()

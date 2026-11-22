@@ -76,3 +76,24 @@ class ScheduleSlot(Base):
     start_time: Mapped[str] = mapped_column(String(5), nullable=False)
     end_time: Mapped[str] = mapped_column(String(5), nullable=False)
     slot_type: Mapped[str] = mapped_column(String(20), nullable=False)
+
+
+class Subject(Base):
+    __tablename__ = "subjects"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+
+
+class ScheduleSubjectAssignment(Base):
+    __tablename__ = "schedule_subject_assignments"
+
+    # Satu slot pelajaran hanya memiliki satu mata pelajaran.
+    slot_id: Mapped[int] = mapped_column(
+        ForeignKey("schedule_slots.id"),
+        primary_key=True,
+    )
+    subject_id: Mapped[int] = mapped_column(
+        ForeignKey("subjects.id"),
+        nullable=False,
+    )

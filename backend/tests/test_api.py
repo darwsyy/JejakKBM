@@ -291,3 +291,106 @@ def test_schedule_slot_requires_existing_class(client):
     )
 
     assert response.status_code == 404
+
+
+def test_create_and_list_subjects(client):
+    first = client.post("/subjects", json={"name": "Matematika"})
+    second = client.post("/subjects", json={"name": "Bahasa Indonesia"})
+
+    assert first.status_code == 201
+    assert first.json()["name"] == "Matematika"
+    assert second.status_code == 201
+
+    response = client.get("/subjects")
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()] == [
+        "Bahasa Indonesia", "Matematika"
+    ]
+
+
+def test_duplicate_subject_name_is_rejected(client):
+    first = client.post("/subjects", json={"name": "Matematika"})
+    second = client.post("/subjects", json={"name": "Matematika"})
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+
+
+def test_assign_get_change_and_remove_schedule_subject(client):
+    classroom = create_classroom(client, "X TKJ 1")
+    slot_response = client.post(
+        f"/classes/{classroom.json()['id']}/schedule-slots",
+        json={
+            "day_of_week": "Monday",
+            "slot_order": 1,
+            "jp_number": 1,
+            "start_time": "07:45",
+            "end_time": "08:30",
+            "slot_type": "LESSON",
+        },
+    )
+    slot_id = slot_response.json()["id"]
+    first_subject = client.post("/subjects", json={"name": "Matematika"}).json()
+    second_subject = client.post("/subjects", json={"name": "Fisika"}).json()
+
+    assign = client.put(
+        f"/schedule-slots/{slot_id}/subject/{first_subject['id']}"
+    )
+    get_response = client.get(f"/schedule-slots/{slot_id}/subject")
+    change = client.put(
+        f"/schedule-slots/{slot_id}/subject/{second_subject['id']}"
+    )
+    delete_response = client.delete(f"/schedule-slots/{slot_id}/subject")
+
+    assert assign.status_code == 200
+    assert assign.json()["subject_name"] == "Matematika"
+    assert get_response.status_code == 200
+    assert get_response.json()["subject_id"] == first_subject["id"]
+    assert change.status_code == 200
+    assert change.json()["subject_name"] == "Fisika"
+    assert delete_response.status_code == 204
+    assert client.get(f"/schedule-slots/{slot_id}/subject").status_code == 404
+
+
+def test_subject_cannot_be_assigned_to_non_lesson_slot(client):
+    classroom = create_classroom(client, "X TKJ 1")
+    slot_response = client.post(
+        f"/classes/{classroom.json()['id']}/schedule-slots",
+        json={
+            "day_of_week": "Monday",
+            "slot_order": 1,
+            "jp_number": None,
+            "start_time": "10:00",
+            "end_time": "10:15",
+            "slot_type": "BREAK",
+        },
+    )
+    subject = client.post("/subjects", json={"name": "Matematika"}).json()
+
+    response = client.put(
+        f"/schedule-slots/{slot_response.json()['id']}/subject/{subject['id']}"
+    )
+    assert response.status_code == 400
+
+
+def test_subject_assignment_rejects_missing_slot_or_subject(client):
+    classroom = create_classroom(client, "X TKJ 1")
+    slot_response = client.post(
+        f"/classes/{classroom.json()['id']}/schedule-slots",
+        json={
+            "day_of_week": "Monday",
+            "slot_order": 1,
+            "jp_number": 1,
+            "start_time": "07:45",
+            "end_time": "08:30",
+            "slot_type": "LESSON",
+        },
+    )
+    slot_id = slot_response.json()["id"]
+    subject = client.post("/subjects", json={"name": "Matematika"}).json()
+
+    missing_slot = client.put(f"/schedule-slots/999/subject/{subject['id']}")
+    missing_subject = client.put(f"/schedule-slots/{slot_id}/subject/999")
+
+    assert missing_slot.status_code == 404
+    assert missing_subject.status_code == 404

@@ -91,3 +91,20 @@ class ScheduleSlotResponse(ScheduleSlotData):
     class_id: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SubjectCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+
+
+class SubjectResponse(BaseModel):
+    id: int
+    name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ScheduleSubjectResponse(BaseModel):
+    slot_id: int
+    subject_id: int
+    subject_name: str
