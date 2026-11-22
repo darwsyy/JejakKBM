@@ -38,6 +38,16 @@ python backend/create_db.py
 
 Perintah tersebut membuat file `jejak_kbm.db` dan tabel yang diperlukan jika belum tersedia, termasuk data pengguna, kelas, petugas kelas, dan jadwal.
 
+## Mengisi data contoh (opsional)
+
+Setelah database disiapkan, jalankan:
+
+```powershell
+python backend/seed_demo.py
+```
+
+Perintah ini membuat akun demo (`demo_admin`, `demo_guru`, `demo_petugas`), kelas, satu siswa, mata pelajaran, dan jadwal contoh. Aman dijalankan berulang kali karena data yang sudah ada tidak dibuat ulang. Belum ada password karena fitur login belum dibuat. Gunakan hanya untuk database latihan, bukan data sekolah sungguhan.
+
 ## Menjalankan API
 
 ```powershell
@@ -90,6 +100,7 @@ python -m pytest -q
 ## Catatan
 
 - Saat ini belum ada login atau pembatasan akses. Endpoint hanya untuk pengembangan lokal.
+- Data demo dapat dibuat dengan `python backend/seed_demo.py`; gunakan hanya pada database latihan.
 - File database lokal tidak dimasukkan ke Git.
 - Jangan gunakan data pribadi siswa sungguhan untuk pengujian.
 - Penugasan petugas utama belum menyediakan fitur pergantian petugas.

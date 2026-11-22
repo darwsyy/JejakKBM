@@ -602,3 +602,36 @@ def test_class_officer_current_lookup_returns_not_found_when_unassigned(client):
     classroom = create_classroom(client, "X TKJ 1").json()
     response = client.get(f"/classes/{classroom['id']}/officer-current?on_date=2026-07-01")
     assert response.status_code == 404
+
+
+def test_seed_demo_creates_sample_data_and_is_repeatable():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.database import Base
+    from app.models import ClassOfficerPeriod, Classroom, ScheduleSlot, Student, User
+    from seed_demo import seed_demo
+
+    test_engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSession = sessionmaker(bind=test_engine)
+    Base.metadata.create_all(bind=test_engine)
+
+    try:
+        with TestingSession() as db:
+            first_result = seed_demo(db)
+            second_result = seed_demo(db)
+
+            assert first_result == second_result
+            assert db.query(User).count() == 3
+            assert db.query(Classroom).count() == 1
+            assert db.query(Student).count() == 1
+            assert db.query(ScheduleSlot).count() == 2
+            assert db.query(ClassOfficerPeriod).count() == 1
+    finally:
+        Base.metadata.drop_all(bind=test_engine)
+        test_engine.dispose()
