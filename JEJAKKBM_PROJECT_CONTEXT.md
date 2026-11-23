@@ -1106,3 +1106,16 @@ Bagian ini memperbarui ketentuan lama yang masih menyebut proses penugasan dan k
 - Notifikasi memiliki status sudah/belum dibaca dan disimpan di database.
 - Push notification HP belum termasuk implementasi backend ini.
 - Selama login belum dibuat, endpoint notifikasi menggunakan `user_id` sebagai identitas sementara untuk pengembangan lokal.
+
+## Update 2026-11-23 ? GUI Python Flet
+
+- GUI tidak menggunakan file HTML/CSS/JavaScript buatan project. Implementasi GUI berada di `frontend/app.py` menggunakan Python + Flet.
+- Flet menampilkan aplikasi melalui browser (Flutter Web yang dikelola Flet); kode antarmuka yang ditulis dalam project tetap Python.
+- FastAPI tetap backend API di port 8000 dan SQLite tetap database. Flet berjalan terpisah di port 8550 dan memanggil API dengan HTTPX.
+- FastAPI dipatok `>=0.115,<0.120` karena Flet Web 0.86.5 masih menggunakan argumen `openapi_prefix` yang tidak tersedia pada FastAPI versi terbaru.
+- Menjalankan backend dari root project: `python -m uvicorn app.main:app --app-dir backend --reload`.
+- Menjalankan GUI dari root project di terminal kedua: `python -m frontend.app`.
+- GUI dibuka di `http://127.0.0.1:8550/JejakKBM`; dokumentasi API di `http://127.0.0.1:8000/docs`.
+- GUI awal menyediakan login/bootstrap admin, pengelolaan akun dan kelas, pembuatan siswa, penetapan petugas kelas dan periodenya, pembuatan mata pelajaran serta slot jadwal, penugasan guru ke slot, jadwal guru piket, pembuatan dan pengiriman jurnal, laporan guru tidak hadir, inbox pemeriksaan guru piket, pembuatan sesi pembelajaran, input absensi per siswa, dan notifikasi.
+- Pengujian backend setelah migrasi GUI: 112 passed, 1 warning. Endpoint Flet Web mengembalikan HTTP 200; endpoint `/health` backend juga HTTP 200.
+- GUI masih perlu uji manual melalui browser, terutama rangkaian setup admin -> jurnal petugas kelas -> sesi dan absensi guru -> review guru piket. Beberapa input memakai ID hasil pembuatan data agar alur tetap sederhana. Jangan menganggap seluruh alur GUI sudah selesai hanya karena backend tests lulus.

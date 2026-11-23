@@ -92,13 +92,19 @@ def read_access_token(token: str) -> tuple[int, int]:
 
 # Login JejakKBM menggunakan JSON, sedangkan akses endpoint memakai Bearer token.
 # HTTPBearer membuat Swagger menampilkan kolom token biasa, bukan form OAuth2 password.
-bearer_scheme = HTTPBearer()
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token login diperlukan.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     user_id, token_version = read_access_token(credentials.credentials)
     user = db.query(User).filter(User.id == user_id).first()
     if user is None or not user.is_active or user.token_version != token_version:

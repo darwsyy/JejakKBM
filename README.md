@@ -1,4 +1,4 @@
-# JejakKBM
+﻿# JejakKBM
 
 Sistem jurnal Kegiatan Belajar Mengajar (KBM) digital.
 
@@ -241,7 +241,7 @@ $env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
 
 - `GET /classes/{class_id}/daily-schedule?on_date=YYYY-MM-DD` menampilkan slot jadwal kelas pada tanggal yang dipilih, guru terjadwal, guru yang benar-benar mengajar, dan status jurnal.
 - Saat membuat atau mengubah slot, backend menolak waktu yang bertabrakan dengan slot lain pada kelas dan hari yang sama.
-- Dua slot yang waktunya tepat bersebelahan tetap diperbolehkan, misalnya 08:30–09:15 dan 09:15–10:00.
+- Dua slot yang waktunya tepat bersebelahan tetap diperbolehkan, misalnya 08:30â€“09:15 dan 09:15â€“10:00.
 - Jadwal khusus seperti Apel, Kokurikuler, Istirahat, dan kegiatan lain dimasukkan sebagai tipe slot yang sesuai. Jadwal rutin sekolah diatur melalui slot per hari.
 
 ### Laporan administrasi
@@ -260,14 +260,28 @@ $env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
 - SQLite sekarang mengaktifkan pemeriksaan foreign key pada koneksi aplikasi. Relasi yang masih dipakai tidak bisa dihapus diam-diam; data harus tetap konsisten.
 
 
-## GUI Partial 1
+## GUI Python (Flet)
 
-GUI awal dibuat dengan HTML, CSS, dan JavaScript sederhana tanpa framework tambahan. Halaman ini responsif untuk laptop dan browser HP.
+GUI menggunakan Python + Flet. Tidak ada file HTML, CSS, atau JavaScript yang ditulis sebagai source GUI project. Flet mengurus tampilan browser, sementara kode UI tetap berada di `frontend/app.py`.
 
-1. Jalankan backend menggunakan perintah Uvicorn seperti biasa.
-2. Buka `http://127.0.0.1:8000/` atau `http://127.0.0.1:8000/app`.
-3. Login menggunakan username dan password akun yang sudah dibuat melalui API.
-4. Halaman mengambil identitas akun dari `GET /auth/me` dan menampilkan menu sesuai role.
-5. Tombol Keluar memanggil `POST /auth/logout` lalu menghapus token dari sesi browser.
+## Menjalankan aplikasi GUI (Python Flet)
 
-File GUI berada di `frontend/index.html`. Tahap ini baru mencakup login dan kerangka dashboard; menu operasional akan dihubungkan pada partial berikutnya. Token disimpan di `sessionStorage`, sehingga tidak dipertahankan setelah sesi tab browser berakhir.
+JejakKBM menggunakan Flet untuk GUI. Kode tampilan berada di `frontend/app.py` dan ditulis dengan Python. FastAPI tetap menjadi backend dan SQLite menjadi database.
+
+1. Buka terminal pertama di folder utama project, aktifkan virtual environment, lalu jalankan backend:
+
+   ```powershell
+   .\.venv\Scripts\Activate.ps1
+   python -m uvicorn app.main:app --app-dir backend --reload
+   ```
+
+2. Buka terminal kedua di folder utama project, aktifkan virtual environment, lalu jalankan GUI:
+
+   ```powershell
+   .\.venv\Scripts\Activate.ps1
+   python -m frontend.app
+   ```
+
+3. GUI terbuka melalui browser di `http://127.0.0.1:8550/JejakKBM`. Dokumentasi API tersedia di `http://127.0.0.1:8000/docs`.
+
+Jika dependency belum terpasang, jalankan `python -m pip install -r requirements.txt`. Pada penggunaan pertama, buat admin melalui bagian **Setup awal** di layar login. Setelah itu admin dapat membuat akun pengguna dan mengatur password awalnya.
