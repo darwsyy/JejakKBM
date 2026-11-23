@@ -316,31 +316,99 @@ def main(page: ft.Page):
                 options=[ft.DropdownOption(key=d, text=d) for d in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]],
             )
             slot_order = field("Urutan slot", "1", width=150)
-            jp_number = field("Nomor JP", "1", width=150)
+            jp_number = field("Nomor JP (kosongkan untuk slot khusus)", "1", width=220)
             slot_start = field("Mulai", "07:00", width=150)
             slot_end = field("Selesai", "07:45", width=150)
+            slot_type = ft.Dropdown(
+                label="Jenis slot", width=320, value="LESSON",
+                options=[
+                    ft.DropdownOption(key="LESSON", text="Pelajaran"),
+                    ft.DropdownOption(key="ASSEMBLY", text="Apel"),
+                    ft.DropdownOption(key="COCURRICULAR", text="Kokurikuler"),
+                    ft.DropdownOption(key="BREAK", text="Istirahat"),
+                    ft.DropdownOption(key="FREE", text="Jam kosong"),
+                    ft.DropdownOption(key="SPECIAL_EVENT", text="Acara khusus"),
+                ],
+            )
+
+            def update_slot_type(_=None):
+                is_lesson = slot_type.value == "LESSON"
+                jp_number.disabled = not is_lesson
+                if not is_lesson:
+                    jp_number.value = ""
+                elif not jp_number.value.strip():
+                    jp_number.value = "1"
+                page.update()
+
+            slot_type.on_change = update_slot_type
+
+            schedule_preview = ft.Column(spacing=4)
+
+            def refresh_schedule_preview(_=None):
+                schedule_preview.controls.clear()
+                if not schedule_class.value:
+                    schedule_preview.controls.append(ft.Text("Pilih kelas terlebih dahulu."))
+                else:
+                    slots = load_data(
+                        f"/classes/{int(schedule_class.value)}/schedule-slots",
+                        {"day": schedule_day.value},
+                    )
+                    type_names = {
+                        "LESSON": "Pelajaran",
+                        "ASSEMBLY": "Apel",
+                        "COCURRICULAR": "Kokurikuler",
+                        "BREAK": "Istirahat",
+                        "FREE": "Jam kosong",
+                        "SPECIAL_EVENT": "Acara khusus",
+                    }
+                    schedule_preview.controls.extend([
+                        ft.Text(
+                            f"Urutan {slot['slot_order']} • "
+                            f"{type_names.get(slot['slot_type'], slot['slot_type'])} • "
+                            f"{slot['start_time']}-{slot['end_time']}" +
+                            (f" • JP {slot['jp_number']}" if slot["jp_number"] else "")
+                        )
+                        for slot in slots
+                    ] or [ft.Text("Belum ada slot pada hari ini.")])
+                page.update()
+
+            schedule_class.on_change = refresh_schedule_preview
+            schedule_day.on_change = refresh_schedule_preview
+            refresh_schedule_preview()
 
             def create_slot(_):
                 try:
+                    selected_type = slot_type.value
+                    jp_value = jp_number.value.strip()
+                    if selected_type == "LESSON" and not jp_value:
+                        raise RuntimeError("Slot pelajaran wajib memiliki nomor JP.")
                     result = api.post(f"/classes/{int(schedule_class.value)}/schedule-slots", {
                         "day_of_week": schedule_day.value,
                         "slot_order": int(slot_order.value),
-                        "jp_number": int(jp_number.value),
+                        "jp_number": int(jp_value) if selected_type == "LESSON" else None,
                         "start_time": slot_start.value.strip(),
                         "end_time": slot_end.value.strip(),
-                        "slot_type": "LESSON",
+                        "slot_type": selected_type,
                     })
                     notify(f"Slot jadwal dibuat. ID slot: {result['id']}")
                     refresh_slot_options()
+                    refresh_schedule_preview()
                 except Exception as error:
                     notify(str(error), True)
 
-            section("Tambah slot pelajaran", [
-                ft.Text("Form ini membuat satu slot LESSON berdurasi 45 menit."),
-                schedule_class, schedule_day,
+            section("Tambah slot jadwal", [
+                ft.Text(
+                    "Pelajaran memakai nomor JP dan durasi 45 menit. "
+                    "Slot khusus tidak perlu nomor JP dan boleh memiliki durasi berbeda."
+                ),
+                schedule_class, schedule_day, slot_type,
                 ft.Row([slot_order, jp_number]),
                 ft.Row([slot_start, slot_end]),
                 button("Buat slot jadwal", create_slot, True),
+            ])
+            section("Jadwal kelas yang dipilih", [
+                ft.Text("Daftar slot untuk kelas dan hari yang sedang dipilih."),
+                schedule_preview,
             ])
 
             subjects = load_data("/subjects")
@@ -384,8 +452,12 @@ def main(page: ft.Page):
                     slot_to_assign.value = None
                 page.update()
 
-            schedule_class.on_change = refresh_slot_options
-            schedule_day.on_change = refresh_slot_options
+            def refresh_schedule_controls(_=None):
+                refresh_schedule_preview()
+                refresh_slot_options()
+
+            schedule_class.on_change = refresh_schedule_controls
+            schedule_day.on_change = refresh_schedule_controls
             refresh_slot_options()
 
             def assign_subject(_):
