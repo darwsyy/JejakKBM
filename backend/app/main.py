@@ -1,7 +1,8 @@
 import csv
 import re
-from datetime import date
+from datetime import date, datetime
 from io import StringIO
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from sqlalchemy.exc import IntegrityError
@@ -1423,6 +1424,83 @@ def get_daily_schedule(
     )
 
 
+@app.get(
+    "/teachers/me/current-schedule",
+    tags=["Schedule"],
+    dependencies=[Depends(require_roles("teacher"))],
+)
+def get_teacher_current_schedule(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    now = datetime.now(ZoneInfo("Asia/Jakarta"))
+    today = now.date()
+    day_name = today.strftime("%A")
+    assignments = db.query(ScheduleTeacherAssignment, ScheduleSlot, Classroom).join(
+        ScheduleSlot, ScheduleSlot.id == ScheduleTeacherAssignment.slot_id
+    ).join(
+        Classroom, Classroom.id == ScheduleSlot.class_id
+    ).filter(
+        ScheduleTeacherAssignment.teacher_id == current_user.id,
+        ScheduleSlot.day_of_week == day_name,
+    ).order_by(ScheduleSlot.start_time, Classroom.name).all()
+
+    slots = []
+    for assignment, slot, classroom in assignments:
+        subject_assignment = db.query(ScheduleSubjectAssignment).filter(
+            ScheduleSubjectAssignment.slot_id == slot.id
+        ).first()
+        subject = db.query(Subject).filter(
+            Subject.id == subject_assignment.subject_id
+        ).first() if subject_assignment else None
+        start = datetime.strptime(slot.start_time, "%H:%M").time()
+        end = datetime.strptime(slot.end_time, "%H:%M").time()
+        current_time = now.time().replace(tzinfo=None)
+        state = "CURRENT" if start <= current_time < end else (
+            "UPCOMING" if current_time < start else "FINISHED"
+        )
+        journal = db.query(DailyJournal).filter(
+            DailyJournal.class_id == classroom.id,
+            DailyJournal.journal_date == today,
+        ).first()
+        session_link = None
+        if journal:
+            session_link = db.query(JournalSessionSlot).join(
+                JournalSession, JournalSession.id == JournalSessionSlot.session_id
+            ).filter(
+                JournalSession.journal_id == journal.id,
+                JournalSessionSlot.slot_id == slot.id,
+            ).first()
+        session = db.query(JournalSession).filter(
+            JournalSession.id == session_link.session_id
+        ).first() if session_link else None
+        slots.append({
+            "slot_id": slot.id,
+            "class_id": classroom.id,
+            "class_name": classroom.name,
+            "jp_number": slot.jp_number,
+            "start_time": slot.start_time,
+            "end_time": slot.end_time,
+            "slot_type": slot.slot_type,
+            "subject_name": subject.name if subject else None,
+            "state": state,
+            "journal_id": journal.id if journal else None,
+            "journal_status": journal.status if journal else "MISSING",
+            "session_id": session.id if session else None,
+        })
+
+    current_slot = next((item for item in slots if item["state"] == "CURRENT"), None)
+    return {
+        "timezone": "Asia/Jakarta (WIB)",
+        "current_date": today,
+        "current_time": now.strftime("%H:%M:%S"),
+        "teacher_id": current_user.id,
+        "teacher_name": current_user.full_name,
+        "current_slot": current_slot,
+        "today_slots": slots,
+    }
+
+
 @app.post(
     "/journals",
     response_model=DailyJournalResponse,
@@ -2451,6 +2529,78 @@ def build_attendance_report(
 
 
 @app.get(
+    "/reports/class-attendance-matrix",
+    tags=["Reports"],
+    dependencies=[Depends(require_roles("admin"))],
+)
+def get_class_attendance_matrix(
+    class_id: int,
+    start_date: date,
+    end_date: date,
+    db: Session = Depends(get_db),
+):
+    if end_date < start_date or (end_date - start_date).days > 366:
+        raise HTTPException(status_code=422, detail="Rentang tanggal tidak valid (maksimal 366 hari).")
+    classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
+    if classroom is None:
+        raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+
+    roster = db.query(ClassRosterNumber).filter(
+        ClassRosterNumber.class_id == class_id,
+        ClassRosterNumber.is_active.is_(True),
+    ).order_by(ClassRosterNumber.attendance_number).all()
+    dates = [
+        start_date.fromordinal(start_date.toordinal() + offset)
+        for offset in range((end_date - start_date).days + 1)
+    ]
+    journals = db.query(DailyJournal).filter(
+        DailyJournal.class_id == class_id,
+        DailyJournal.journal_date >= start_date,
+        DailyJournal.journal_date <= end_date,
+    ).all()
+    journal_by_id = {item.id: item.journal_date for item in journals}
+    sessions = db.query(JournalSession).filter(
+        JournalSession.journal_id.in_(journal_by_id.keys())
+    ).all() if journal_by_id else []
+    session_ids = [item.id for item in sessions]
+    records = db.query(ClassAttendanceRecord).filter(
+        ClassAttendanceRecord.class_id == class_id,
+        ClassAttendanceRecord.session_id.in_(session_ids),
+    ).all() if session_ids else []
+
+    # Jika seorang nomor memiliki beberapa JP dalam sehari, tampilkan status
+    # non-hadir yang paling informatif; selain itu H jika semua catatan hadir.
+    priority = {"ABSENT": 5, "SICK": 4, "DISPENSED": 3, "PERMITTED": 2, "PRESENT": 1}
+    date_by_session = {item.id: journal_by_id[item.journal_id] for item in sessions}
+    status_by_cell = {}
+    for record in records:
+        cell = (date_by_session[record.session_id], record.attendance_number)
+        previous = status_by_cell.get(cell)
+        if previous is None or priority.get(record.attendance_status, 0) > priority.get(previous, 0):
+            status_by_cell[cell] = record.attendance_status
+
+    code = {"PRESENT": "H", "SICK": "S", "PERMITTED": "I", "DISPENSED": "D", "ABSENT": "A"}
+    return {
+        "class_id": classroom.id,
+        "class_name": classroom.name,
+        "start_date": start_date,
+        "end_date": end_date,
+        "dates": dates,
+        "attendance_numbers": [
+            {
+                "attendance_number": row.attendance_number,
+                "days": {
+                    day.isoformat(): code.get(status_by_cell.get((day, row.attendance_number)), "-")
+                    for day in dates
+                },
+            }
+            for row in roster
+        ],
+        "legend": {"H": "Hadir", "S": "Sakit", "I": "Izin", "D": "Dispensasi", "A": "Alpa", "-": "Belum ada catatan"},
+    }
+
+
+@app.get(
     "/reports/attendance",
     response_model=AttendanceReportResponse,
     tags=["Reports"],
@@ -2600,7 +2750,7 @@ def get_class_dashboard(
         DailyJournal.class_id == class_id,
         DailyJournal.journal_date == selected_date,
     ).first()
-    attendance_statuses = ["PRESENT", "SICK", "PERMITTED", "ABSENT"]
+    attendance_statuses = ["PRESENT", "SICK", "PERMITTED", "DISPENSED", "ABSENT"]
     total_counts = {name: 0 for name in attendance_statuses}
     session_results = []
     reviews = []
@@ -2621,9 +2771,13 @@ def get_class_dashboard(
                 for link in links
             ]
             slots.sort(key=lambda slot: slot.slot_order)
-            records = db.query(AttendanceRecord).filter(
-                AttendanceRecord.session_id == session.id
+            records = db.query(ClassAttendanceRecord).filter(
+                ClassAttendanceRecord.session_id == session.id
             ).all()
+            if not records:
+                records = db.query(AttendanceRecord).filter(
+                    AttendanceRecord.session_id == session.id
+                ).all()
             counts = {name: 0 for name in attendance_statuses}
             for record in records:
                 if record.attendance_status in counts:

@@ -1135,3 +1135,14 @@ Bagian ini memperbarui ketentuan lama yang masih menyebut proses penugasan dan k
 - Attendance completeness and journal submission use the anonymous class roster when configured; otherwise they fall back to legacy student records.
 - Teacher GUI attendance input now displays attendance numbers instead of student names and submits to the new class-attendance endpoint.
 - Existing DB startup uses SQLAlchemy `create_all`, which creates the new tables without dropping old tables. Existing classes without a roster get a default 40-number roster when the roster endpoint is first requested.
+
+## Update 2026-11-23 — Rekap Matriks dan Deteksi JP Guru
+
+- Endpoint `GET /reports/class-attendance-matrix?class_id=...&start_date=...&end_date=...` menampilkan rekap nomor absen per tanggal untuk kelas yang dipilih.
+- Kode matriks: H=Hadir, S=Sakit, I=Izin, D=Dispensasi, A=Alpa, -=belum ada catatan. Jika satu nomor memiliki beberapa catatan JP pada tanggal yang sama, matriks menampilkan status non-hadir dengan prioritas tertinggi (Alpa, Sakit, Dispensasi, Izin, Hadir).
+- Status `DISPENSED` ditambahkan khusus pada alur absensi nomor absen; tabel lama tidak diubah.
+- Dashboard kelas menghitung catatan dari `ClassAttendanceRecord` terlebih dahulu, lalu fallback ke `AttendanceRecord` lama bila sesi belum memakai roster anonim.
+- Endpoint `GET /teachers/me/current-schedule` mengembalikan tanggal/jam WIB (`Asia/Jakarta`), slot guru hari ini, mapel, kelas, JP, dan status CURRENT/UPCOMING/FINISHED, serta jurnal/sesi terkait jika sudah ada.
+- GUI admin memiliki bagian Rekap absensi per nomor absen; GUI guru menampilkan jadwal mengajar hari ini dan JP yang sedang berlangsung.
+- Catatan: deteksi JP sudah membaca waktu server WIB saat endpoint dipanggil atau saat tombol perbarui ditekan. Pembaruan otomatis berkala belum dibuat. Pembuatan sesi guru masih menggunakan alur jurnal yang sudah ada; integrasi sekali klik dari JP aktif menjadi task berikutnya.
+- Verifikasi: compileall, import Flet, tes matriks, tes jadwal WIB, dan seluruh test suite.

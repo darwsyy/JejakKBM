@@ -2019,6 +2019,22 @@ def test_logged_in_user_cannot_act_as_another_user(client):
 
 
 
+def test_teacher_current_schedule_uses_wib_and_returns_today_slots(client):
+    teacher = create_user(client, "teacher_current_schedule", role="teacher").json()
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=teacher["id"], username=teacher["username"],
+        full_name=teacher["full_name"], role="teacher",
+        is_active=True, password_hash=None, token_version=0,
+    )
+    response = client.get("/teachers/me/current-schedule")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["timezone"] == "Asia/Jakarta (WIB)"
+    assert result["teacher_id"] == teacher["id"]
+    assert "current_time" in result
+    assert "today_slots" in result
+
+
 def test_daily_schedule_shows_slots_and_actual_teacher(client):
     session, teacher, student, slot_ids = setup_session_with_student(client)
 
@@ -2034,6 +2050,34 @@ def test_daily_schedule_shows_slots_and_actual_teacher(client):
     first_slot = next(item for item in result["slots"] if item["slot_id"] == slot_ids[0])
     assert first_slot["session_id"] == session["id"]
     assert first_slot["actual_teacher_id"] == teacher["id"]
+
+
+def test_class_attendance_matrix_returns_number_by_date(client):
+    session, teacher, _student, slot_ids = setup_session_with_student(client)
+    client.put("/classes/1/roster", json={"roster_size": 2})
+    recorded = client.post(
+        f"/journal-sessions/{session['id']}/class-attendance",
+        json={
+            "slot_id": slot_ids[0],
+            "teacher_id": teacher["id"],
+            "records": [
+                {"attendance_number": 1, "attendance_status": "PRESENT"},
+                {"attendance_number": 2, "attendance_status": "SICK"},
+            ],
+        },
+    )
+    assert recorded.status_code == 201
+
+    response = client.get(
+        "/reports/class-attendance-matrix"
+        "?class_id=1&start_date=2026-11-23&end_date=2026-11-24"
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["class_name"] == "X TKJ 1"
+    assert result["attendance_numbers"][0]["days"]["2026-11-23"] == "H"
+    assert result["attendance_numbers"][1]["days"]["2026-11-23"] == "S"
+    assert result["attendance_numbers"][0]["days"]["2026-11-24"] == "-"
 
 
 def test_attendance_report_and_csv_export(client):

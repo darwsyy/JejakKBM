@@ -450,6 +450,62 @@ def main(page: ft.Page):
             ])
             refresh_subjects()
 
+            matrix_class = ft.Dropdown(
+                label="Kelas rekap", width=320,
+                options=[
+                    ft.DropdownOption(key=str(c["id"]), text=c["name"])
+                    for c in classes
+                ],
+            )
+            matrix_start = field("Tanggal mulai (YYYY-MM-DD)", str(date.today().replace(day=1)))
+            matrix_end = field("Tanggal akhir (YYYY-MM-DD)", str(date.today()))
+            matrix_result = ft.Column(scroll=ft.ScrollMode.AUTO, spacing=4)
+
+            def load_attendance_matrix(_=None):
+                try:
+                    if not matrix_class.value:
+                        raise RuntimeError("Pilih kelas terlebih dahulu.")
+                    result = api.get("/reports/class-attendance-matrix", {
+                        "class_id": int(matrix_class.value),
+                        "start_date": matrix_start.value.strip(),
+                        "end_date": matrix_end.value.strip(),
+                    })
+                    matrix_result.controls.clear()
+                    matrix_result.controls.append(
+                        ft.Text(
+                            f"Rekap {result['class_name']} • "
+                            f"{result['start_date']} s.d. {result['end_date']}",
+                            weight=ft.FontWeight.BOLD,
+                        )
+                    )
+                    matrix_result.controls.append(
+                        ft.Text("Kode: H Hadir • S Sakit • I Izin • D Dispensasi • A Alpa • - Belum ada catatan")
+                    )
+                    headers = [ft.DataColumn(ft.Text("No."))] + [
+                        ft.DataColumn(ft.Text(day[5:]))
+                        for day in result["dates"]
+                    ]
+                    rows = []
+                    for item in result["attendance_numbers"]:
+                        cells = [ft.DataCell(ft.Text(str(item["attendance_number"])))]
+                        cells.extend(
+                            ft.DataCell(ft.Text(item["days"][day]))
+                            for day in result["dates"]
+                        )
+                        rows.append(ft.DataRow(cells=cells))
+                    matrix_result.controls.append(
+                        ft.DataTable(columns=headers, rows=rows, column_spacing=12)
+                    )
+                    page.update()
+                except Exception as error:
+                    notify(str(error), True)
+
+            section("Rekap absensi per nomor absen", [
+                matrix_class, ft.Row([matrix_start, matrix_end]),
+                button("Tampilkan rekap", load_attendance_matrix, True),
+                matrix_result,
+            ])
+
             schedule_class = ft.Dropdown(
                 label="Kelas jadwal", width=320,
                 options=[ft.DropdownOption(key=str(c["id"]), text=f"{c['name']} (ID {c['id']})") for c in classes],
@@ -862,6 +918,61 @@ def main(page: ft.Page):
             ])
 
         elif role == "teacher":
+            current_schedule_area = ft.Column(spacing=6)
+
+            def refresh_teacher_current_schedule(_=None):
+                try:
+                    result = api.get("/teachers/me/current-schedule")
+                    current_schedule_area.controls.clear()
+                    current = result.get("current_slot")
+                    if current:
+                        current_schedule_area.controls.append(
+                            ft.Text(
+                                f"SEDANG BERLANGSUNG • JP {current['jp_number']} • "
+                                f"{current['class_name']} • {current['subject_name'] or 'Mapel belum diatur'}",
+                                weight=ft.FontWeight.BOLD,
+                            )
+                        )
+                        current_schedule_area.controls.append(
+                            ft.Text(
+                                f"{current['start_time']}-{current['end_time']} • "
+                                f"Jurnal: {current['journal_status']}"
+                            )
+                        )
+                    else:
+                        current_schedule_area.controls.append(
+                            ft.Text("Tidak ada JP yang sedang berlangsung pada jadwal Anda.")
+                        )
+                    current_schedule_area.controls.append(
+                        ft.Text(
+                            f"Waktu server: {result['current_date']} "
+                            f"{result['current_time']} WIB"
+                        )
+                    )
+                    for item in result.get("today_slots", []):
+                        state_label = {
+                            "CURRENT": "SEDANG BERLANGSUNG",
+                            "UPCOMING": "SELANJUTNYA",
+                            "FINISHED": "SELESAI",
+                        }.get(item["state"], item["state"])
+                        current_schedule_area.controls.append(
+                            ft.Text(
+                                f"{state_label} • {item['start_time']}-{item['end_time']} • "
+                                f"JP {item['jp_number'] or '-'} • {item['class_name']} • "
+                                f"{item['subject_name'] or 'Mapel belum diatur'}"
+                            )
+                        )
+                    page.update()
+                except Exception as error:
+                    notify(str(error), True)
+
+            section("Jadwal mengajar hari ini", [
+                ft.Text("Jadwal dibaca otomatis berdasarkan waktu WIB dan penugasan guru."),
+                button("Perbarui jadwal sekarang", refresh_teacher_current_schedule, True),
+                current_schedule_area,
+            ])
+            refresh_teacher_current_schedule()
+
             duty_rosters = load_data("/duty-rosters", {"duty_date": str(date.today())})
             is_duty_teacher = any(
                 roster["teacher_user_id"] == user["id"]
@@ -1066,6 +1177,7 @@ def main(page: ft.Page):
                 ft.DropdownOption(key="PRESENT", text="Hadir"),
                 ft.DropdownOption(key="SICK", text="Sakit"),
                 ft.DropdownOption(key="PERMITTED", text="Izin"),
+                ft.DropdownOption(key="DISPENSED", text="Dispensasi"),
                 ft.DropdownOption(key="ABSENT", text="Alpa"),
             ]
             loaded_sessions = []

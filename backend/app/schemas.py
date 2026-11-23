@@ -149,7 +149,7 @@ class ClassRosterNumberResponse(BaseModel):
 
 class ClassAttendanceBatchItem(BaseModel):
     attendance_number: int = Field(ge=1, le=60)
-    attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "ABSENT"]
+    attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "DISPENSED", "ABSENT"]
 
 
 class ClassAttendanceBatchCreate(BaseModel):
@@ -174,7 +174,7 @@ class ClassAttendanceRecordResponse(BaseModel):
     jp_number: int
     teacher_id: int
     teacher_name: str
-    attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "ABSENT"]
+    attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "DISPENSED", "ABSENT"]
     recorded_at: datetime
 
 
