@@ -10,6 +10,10 @@ class UserCreate(BaseModel):
     role: Literal["admin", "class_officer", "teacher"]
 
 
+class UserUpdate(BaseModel):
+    full_name: str = Field(min_length=2, max_length=100)
+
+
 class UserResponse(BaseModel):
     id: int
     username: str

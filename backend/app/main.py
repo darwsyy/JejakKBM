@@ -45,6 +45,7 @@ from app.schemas import (
     ClassroomCreate,
     ClassroomResponse,
     UserCreate,
+    UserUpdate,
     UserResponse,
     ScheduleSlotCreate,
     ScheduleSlotResponse,
@@ -247,6 +248,52 @@ def create_user(data: UserCreate, db: Session = Depends(get_db)):
 @app.get("/users", response_model=list[UserResponse], tags=["Users"], dependencies=[Depends(require_roles("admin"))])
 def get_users(db: Session = Depends(get_db)):
     return db.query(User).order_by(User.id).all()
+
+
+@app.put(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    tags=["Users"],
+    dependencies=[Depends(require_roles("admin"))],
+)
+def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
+    user.full_name = data.full_name.strip()
+    if len(user.full_name) < 2:
+        raise HTTPException(status_code=422, detail="Nama lengkap minimal 2 karakter.")
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.delete(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    tags=["Users"],
+)
+def deactivate_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_roles("admin")),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan.")
+    if isinstance(admin.id, int) and user.id == admin.id:
+        raise HTTPException(status_code=400, detail="Admin tidak dapat menonaktifkan akunnya sendiri.")
+    if user.role == "admin":
+        active_admins = db.query(User).filter(
+            User.role == "admin", User.is_active.is_(True)
+        ).count()
+        if active_admins <= 1:
+            raise HTTPException(status_code=400, detail="Tidak dapat menonaktifkan admin aktif terakhir.")
+    user.is_active = False
+    user.token_version += 1
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @app.post(

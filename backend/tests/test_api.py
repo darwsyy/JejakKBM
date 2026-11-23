@@ -2029,3 +2029,42 @@ def test_approved_journal_cannot_be_changed_again(client):
     assert session_update.status_code == 400
     assert attendance_update.status_code == 400
     assert resubmit.status_code == 400
+
+
+
+def test_update_user_full_name(client):
+    created = create_user(client, "akun_edit")
+    user_id = created.json()["id"]
+
+    response = client.put(
+        f"/users/{user_id}",
+        json={"full_name": "Nama Baru"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["full_name"] == "Nama Baru"
+    assert response.json()["username"] == "akun_edit"
+
+
+def test_deactivate_user(client):
+    created = create_user(client, "akun_nonaktif")
+    user_id = created.json()["id"]
+
+    response = client.delete(f"/users/{user_id}")
+
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
+
+    users = client.get("/users").json()
+    saved_user = next(item for item in users if item["id"] == user_id)
+    assert saved_user["is_active"] is False
+
+
+def test_cannot_deactivate_last_active_admin(client):
+    created = create_user(client, "admin_kedua", role="admin")
+    user_id = created.json()["id"]
+
+    response = client.delete(f"/users/{user_id}")
+
+    assert response.status_code == 400
+    assert "admin aktif terakhir" in response.json()["detail"]

@@ -207,6 +207,115 @@ def main(page: ft.Page):
                 ft.Text("Password awal langsung diatur setelah akun dibuat."),
             ])
 
+            account_records = list(users)
+            account_list = ft.Column(spacing=4)
+            account_to_edit = ft.Dropdown(
+                label="Pilih akun", width=520, options=[],
+            )
+            account_edit_name = field("Ubah nama lengkap", width=420)
+            account_new_password = field("Password baru (minimal 8 karakter)", password=True)
+
+            def refresh_account_list(_=None):
+                account_records.clear()
+                account_records.extend(api.get("/users"))
+                users[:] = account_records
+                account_to_edit.options = [
+                    ft.DropdownOption(
+                        key=str(item["id"]),
+                        text=f"{item['full_name']} • {item['username']} • "
+                             f"{item['role']} • "
+                             f"{'Aktif' if item['is_active'] else 'Nonaktif'}",
+                    )
+                    for item in account_records
+                ]
+                account_to_edit.value = None
+                account_list.controls = [
+                    ft.Text(
+                        f"ID {item['id']} • {item['full_name']} • "
+                        f"{item['username']} • {item['role']} • "
+                        f"{'Aktif' if item['is_active'] else 'Nonaktif'}"
+                    )
+                    for item in account_records
+                ] or [ft.Text("Belum ada akun.")]
+
+                page.update()
+
+            def load_account_to_edit(_=None):
+                selected = next(
+                    (item for item in account_records
+                     if str(item["id"]) == account_to_edit.value),
+                    None,
+                )
+                if selected is None:
+                    return
+                account_edit_name.value = selected["full_name"]
+                account_new_password.value = ""
+                page.update()
+
+            account_to_edit.on_change = load_account_to_edit
+
+            def update_account_name(_):
+                try:
+                    if not account_to_edit.value:
+                        raise RuntimeError("Pilih akun yang akan diubah.")
+                    api.put(f"/users/{int(account_to_edit.value)}", {
+                        "full_name": account_edit_name.value.strip(),
+                    })
+                    notify("Nama akun berhasil diperbarui.")
+                    refresh_account_list()
+                except Exception as error:
+                    notify(str(error), True)
+
+            def reset_account_password(_):
+                try:
+                    if not account_to_edit.value:
+                        raise RuntimeError("Pilih akun yang password-nya akan diatur ulang.")
+                    if len(account_new_password.value) < 8:
+                        raise RuntimeError("Password baru minimal 8 karakter.")
+                    api.put(
+                        f"/users/{int(account_to_edit.value)}/password",
+                        {"password": account_new_password.value},
+                    )
+                    account_new_password.value = ""
+                    notify("Password akun berhasil diatur ulang. Sesi lama akun tersebut tidak berlaku.")
+                    page.update()
+                except Exception as error:
+                    notify(str(error), True)
+
+            def deactivate_account(_):
+                try:
+                    if not account_to_edit.value:
+                        raise RuntimeError("Pilih akun yang akan dinonaktifkan.")
+                    selected = next(
+                        (item for item in account_records
+                         if str(item["id"]) == account_to_edit.value),
+                        None,
+                    )
+                    if selected and selected["id"] == user["id"]:
+                        raise RuntimeError("Akun yang sedang digunakan tidak dapat dinonaktifkan.")
+                    api.request("DELETE", f"/users/{int(account_to_edit.value)}")
+                    notify("Akun dinonaktifkan dan token aktifnya dicabut.")
+                    refresh_account_list()
+                except Exception as error:
+                    notify(str(error), True)
+
+            section("Daftar dan pengelolaan akun", [
+                button("Muat ulang daftar akun", refresh_account_list),
+                account_list,
+                account_to_edit,
+                account_edit_name,
+                button("Simpan nama", update_account_name, True),
+                account_new_password,
+                button("Atur ulang password", reset_account_password),
+                button("Nonaktifkan akun", deactivate_account),
+                ft.Text(
+                    "Username dan role tidak dapat diubah dari menu ini. "
+                    "Akun admin yang sedang digunakan dan admin aktif terakhir dilindungi.",
+                    color=ft.Colors.GREY_700,
+                ),
+            ])
+            refresh_account_list()
+
             class_name = field("Nama kelas")
             academic_year = field("Tahun ajaran", "2026/2027")
 
@@ -477,7 +586,7 @@ def main(page: ft.Page):
             ])
             refresh_teacher_list()
 
-            officers = [u for u in users if u["role"] == "class_officer"]
+            officers = [u for u in users if u["role"] == "class_officer" and u.get("is_active", True)]
             officer_class = ft.Dropdown(
                 label="Kelas untuk petugas", width=320,
                 options=[ft.DropdownOption(key=str(c["id"]), text=f"{c['name']} (ID {c['id']})") for c in classes],
