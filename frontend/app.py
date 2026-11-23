@@ -627,6 +627,40 @@ def main(page: ft.Page):
             ])
 
             subject_name = field("Nama mata pelajaran")
+            subject_edit_choice = ft.Dropdown(
+                label="Pilih mata pelajaran untuk diubah", width=520, options=[],
+            )
+            subject_edit_name = field("Nama baru", width=420)
+            subject_records = []
+            subject_list = ft.Column(spacing=4)
+
+            def refresh_subjects(_=None):
+                try:
+                    subject_records.clear()
+                    subject_records.extend(api.get("/subjects"))
+                    subject_edit_choice.options = [
+                        ft.DropdownOption(key=str(item['id']), text=f"{item['name']} (ID {item['id']})")
+                        for item in subject_records
+                    ]
+                    subject_edit_choice.value = None
+                    subject_list.controls = [
+                        ft.Text(f"ID {item['id']} • {item['name']}")
+                        for item in subject_records
+                    ] or [ft.Text("Belum ada mata pelajaran.")]
+                    page.update()
+                except Exception as error:
+                    notify(str(error), True)
+
+            def load_subject_to_edit(_=None):
+                selected = next(
+                    (item for item in subject_records if str(item['id']) == subject_edit_choice.value),
+                    None,
+                )
+                if selected:
+                    subject_edit_name.value = selected['name']
+                    page.update()
+
+            subject_edit_choice.on_change = load_subject_to_edit
 
             def create_subject(_):
                 try:
@@ -636,9 +670,28 @@ def main(page: ft.Page):
                 except Exception as error:
                     notify(str(error), True)
 
-            section("Mata pelajaran", [
-                subject_name, button("Tambah mata pelajaran", create_subject),
+            def update_subject_name(_):
+                try:
+                    if not subject_edit_choice.value:
+                        raise RuntimeError("Pilih mata pelajaran yang akan diubah.")
+                    result = api.put(
+                        f"/subjects/{int(subject_edit_choice.value)}",
+                        {"name": subject_edit_name.value.strip()},
+                    )
+                    notify(f"Nama mata pelajaran diperbarui menjadi {result['name']}.")
+                    show_home(user)
+                except Exception as error:
+                    notify(str(error), True)
+
+            section("Pengelolaan mata pelajaran", [
+                subject_name, button("Tambah mata pelajaran", create_subject, True),
+                ft.Divider(),
+                button("Muat ulang daftar mata pelajaran", refresh_subjects),
+                subject_list, subject_edit_choice, subject_edit_name,
+                button("Simpan perubahan nama", update_subject_name),
+                ft.Text("Mata pelajaran tidak dihapus agar riwayat jadwal dan jurnal tetap konsisten.", color=ft.Colors.GREY_700),
             ])
+            refresh_subjects()
 
             schedule_class = ft.Dropdown(
                 label="Kelas jadwal", width=320,

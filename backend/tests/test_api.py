@@ -341,6 +341,21 @@ def test_duplicate_subject_name_is_rejected(client):
     assert second.status_code == 409
 
 
+def test_update_subject_name_and_reject_duplicate(client):
+    first = client.post("/subjects", json={"name": "Matematika"}).json()
+    second = client.post("/subjects", json={"name": "Fisika"}).json()
+
+    updated = client.put(f"/subjects/{first['id']}", json={"name": "Matematika Lanjut"})
+    duplicate = client.put(f"/subjects/{first['id']}", json={"name": "Fisika"})
+    missing = client.put("/subjects/999", json={"name": "Kimia"})
+
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Matematika Lanjut"
+    assert duplicate.status_code == 409
+    assert missing.status_code == 404
+    assert client.get("/subjects").json()[0]["id"] == second["id"]
+
+
 def test_assign_get_change_and_remove_schedule_subject(client):
     classroom = create_classroom(client, "X TKJ 1")
     slot_response = client.post(

@@ -53,6 +53,7 @@ from app.schemas import (
     ScheduleTeacherResponse,
     ScheduleSubjectResponse,
     SubjectCreate,
+    SubjectUpdate,
     SubjectResponse,
     StudentCreate,
     StudentResponse,
@@ -734,6 +735,34 @@ def create_subject(data: SubjectCreate, db: Session = Depends(get_db)):
 @app.get("/subjects", response_model=list[SubjectResponse], tags=["Subjects"], dependencies=[Depends(get_current_user)])
 def get_subjects(db: Session = Depends(get_db)):
     return db.query(Subject).order_by(Subject.name).all()
+
+
+@app.put(
+    "/subjects/{subject_id}",
+    response_model=SubjectResponse,
+    tags=["Subjects"],
+    dependencies=[Depends(require_roles("admin"))],
+)
+def update_subject(
+    subject_id: int,
+    data: SubjectUpdate,
+    db: Session = Depends(get_db),
+):
+    subject = db.query(Subject).filter(Subject.id == subject_id).first()
+    if subject is None:
+        raise HTTPException(status_code=404, detail="Mata pelajaran tidak ditemukan.")
+
+    subject.name = data.name.strip()
+    if len(subject.name) < 2:
+        raise HTTPException(status_code=422, detail="Nama mata pelajaran minimal 2 karakter.")
+
+    try:
+        db.commit()
+        db.refresh(subject)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Nama mata pelajaran sudah digunakan.")
+    return subject
 
 
 @app.put(

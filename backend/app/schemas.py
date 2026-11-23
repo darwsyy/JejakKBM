@@ -104,6 +104,10 @@ class SubjectCreate(BaseModel):
     name: str = Field(min_length=2, max_length=100)
 
 
+class SubjectUpdate(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+
+
 class SubjectResponse(BaseModel):
     id: int
     name: str
