@@ -299,6 +299,7 @@ def main(page: ft.Page):
                 try:
                     result = api.post("/subjects", {"name": subject_name.value.strip()})
                     notify(f"Mata pelajaran dibuat. ID: {result['id']}")
+                    show_home(user)
                 except Exception as error:
                     notify(str(error), True)
 
@@ -330,6 +331,7 @@ def main(page: ft.Page):
                         "slot_type": "LESSON",
                     })
                     notify(f"Slot jadwal dibuat. ID slot: {result['id']}")
+                    refresh_slot_options()
                 except Exception as error:
                     notify(str(error), True)
 
@@ -341,30 +343,79 @@ def main(page: ft.Page):
                 button("Buat slot jadwal", create_slot, True),
             ])
 
-            slot_to_assign = field("ID slot")
-            subject_to_assign = field("ID mata pelajaran")
+            subjects = load_data("/subjects")
+            teachers = [u for u in users if u["role"] == "teacher"]
+            slot_to_assign = ft.Dropdown(label="Slot jadwal", width=520, options=[])
+            subject_to_assign = ft.Dropdown(
+                label="Mata pelajaran", width=320,
+                options=[
+                    ft.DropdownOption(key=str(s["id"]), text=s["name"])
+                    for s in subjects
+                ],
+            )
             teacher_to_assign = ft.Dropdown(
                 label="Guru pengajar", width=320,
-                options=[ft.DropdownOption(key=str(t["id"]), text=f"{t['full_name']} (ID {t['id']})") for t in users if t["role"] == "teacher"],
+                options=[
+                    ft.DropdownOption(key=str(t["id"]), text=t["full_name"])
+                    for t in teachers
+                ],
             )
+
+            def refresh_slot_options(_=None):
+                if not schedule_class.value:
+                    slot_to_assign.options = []
+                    slot_to_assign.value = None
+                else:
+                    slots = load_data(
+                        f"/classes/{int(schedule_class.value)}/schedule-slots",
+                        {"day": schedule_day.value},
+                    )
+                    slot_to_assign.options = [
+                        ft.DropdownOption(
+                            key=str(slot["id"]),
+                            text=(
+                                f"JP {slot['jp_number']} • "
+                                f"{slot['start_time']}-{slot['end_time']} "
+                                f"(slot {slot['slot_order']})"
+                            ),
+                        )
+                        for slot in slots if slot["slot_type"] == "LESSON"
+                    ]
+                    slot_to_assign.value = None
+                page.update()
+
+            schedule_class.on_change = refresh_slot_options
+            schedule_day.on_change = refresh_slot_options
+            refresh_slot_options()
 
             def assign_subject(_):
                 try:
-                    api.put(f"/schedule-slots/{int(slot_to_assign.value)}/subject/{int(subject_to_assign.value)}")
+                    if not slot_to_assign.value or not subject_to_assign.value:
+                        raise RuntimeError("Pilih slot dan mata pelajaran terlebih dahulu.")
+                    api.put(
+                        f"/schedule-slots/{int(slot_to_assign.value)}/subject/"
+                        f"{int(subject_to_assign.value)}"
+                    )
                     notify("Mata pelajaran berhasil dipasang ke slot.")
                 except Exception as error:
                     notify(str(error), True)
 
             def assign_teacher(_):
                 try:
-                    api.put(f"/schedule-slots/{int(slot_to_assign.value)}/teacher/{int(teacher_to_assign.value)}")
+                    if not slot_to_assign.value or not teacher_to_assign.value:
+                        raise RuntimeError("Pilih slot dan guru terlebih dahulu.")
+                    api.put(
+                        f"/schedule-slots/{int(slot_to_assign.value)}/teacher/"
+                        f"{int(teacher_to_assign.value)}"
+                    )
                     notify("Guru berhasil dipasang ke slot.")
                 except Exception as error:
                     notify(str(error), True)
 
             section("Atur slot jadwal", [
-                ft.Text("Masukkan ID slot dan ID mata pelajaran dari hasil pembuatan sebelumnya."),
-                slot_to_assign, subject_to_assign, button("Pasang mata pelajaran", assign_subject),
+                ft.Text("Slot diambil otomatis dari kelas dan hari yang dipilih."),
+                slot_to_assign, subject_to_assign,
+                button("Pasang mata pelajaran", assign_subject),
                 teacher_to_assign, button("Pasang guru", assign_teacher),
             ])
 
@@ -442,24 +493,76 @@ def main(page: ft.Page):
                     journal_rows.append(button(f"Kirim jurnal #{journal['id']}", submit_journal))
             section("Daftar jurnal", journal_rows or [ft.Text("Belum ada jurnal.")])
 
-            absence_journal_id = field("ID jurnal")
-            absence_slot_id = field("ID slot JP")
+            absence_journal = ft.Dropdown(
+                label="Jurnal", width=560,
+                options=[
+                    ft.DropdownOption(
+                        key=str(item["id"]),
+                        text=(
+                            f"#{item['id']} • "
+                            f"{next((c['name'] for c in classes if c['id'] == item['class_id']), 'Kelas')} • "
+                            f"{item['journal_date']} • {item['status']}"
+                        ),
+                    )
+                    for item in journals if item["status"] == "DRAFT"
+                ],
+            )
+            absence_slot = ft.Dropdown(
+                label="JP guru tidak hadir", width=420, options=[],
+            )
             absence_note = field("Catatan (opsional)", width=600)
+
+            def load_absence_slots(_):
+                absence_slot.options = []
+                if not absence_journal.value:
+                    page.update()
+                    return
+                selected = next(
+                    item for item in journals if item["id"] == int(absence_journal.value)
+                )
+                schedule = load_data(
+                    f"/classes/{selected['class_id']}/daily-schedule",
+                    {"on_date": selected["journal_date"]},
+                )
+                absence_slot.options = [
+                    ft.DropdownOption(
+                        key=str(slot["slot_id"]),
+                        text=(
+                            f"JP {slot['jp_number']} • {slot['start_time']}-"
+                            f"{slot['end_time']} • "
+                            f"{slot['scheduled_teacher_name'] or 'Guru belum diatur'}"
+                        ),
+                    )
+                    for slot in schedule.get("slots", [])
+                    if slot["slot_type"] == "LESSON" and slot["jp_number"] is not None
+                ]
+                absence_slot.value = None
+                page.update()
+
+            absence_journal.on_change = load_absence_slots
 
             def report_absence(_):
                 try:
-                    result = api.post(f"/journals/{int(absence_journal_id.value)}/absence-reports", {
-                        "slot_id": int(absence_slot_id.value),
-                        "officer_user_id": user["id"],
-                        "notes": absence_note.value.strip() or None,
-                    })
-                    notify(f"Laporan guru tidak hadir tersimpan untuk JP {result['jp_number']}.")
+                    if not absence_journal.value or not absence_slot.value:
+                        raise RuntimeError("Pilih jurnal dan JP terlebih dahulu.")
+                    result = api.post(
+                        f"/journals/{int(absence_journal.value)}/absence-reports",
+                        {
+                            "slot_id": int(absence_slot.value),
+                            "officer_user_id": user["id"],
+                            "notes": absence_note.value.strip() or None,
+                        },
+                    )
+                    notify(
+                        f"Laporan guru tidak hadir tersimpan untuk JP {result['jp_number']}."
+                    )
                 except Exception as error:
                     notify(str(error), True)
 
             section("Laporan guru tidak hadir", [
-                ft.Text("Diperlukan jika guru yang mengisi sesi berbeda dari guru terjadwal."),
-                absence_journal_id, absence_slot_id, absence_note,
+                ft.Text("Pilih jurnal dan JP dari jadwal kelas. Diperlukan jika guru pengisi berbeda dari guru terjadwal."),
+                absence_journal, absence_slot, absence_note,
+                button("Muat daftar JP", load_absence_slots),
                 button("Simpan laporan", report_absence),
             ])
 
@@ -530,38 +633,101 @@ def main(page: ft.Page):
                 )
             ])
 
-            journal_id = field("ID jurnal untuk mengisi sesi")
-            slot_ids = field("ID slot JP (pisahkan koma)", "1")
+            classes = load_data("/classes")
+            class_names = {item["id"]: item["name"] for item in classes}
+            journals = load_data("/journals")
+            journal_options = [
+                ft.DropdownOption(
+                    key=str(item["id"]),
+                    text=(
+                        f"#{item['id']} • {class_names.get(item['class_id'], 'Kelas')} • "
+                        f"{item['journal_date']} • {item['status']}"
+                    ),
+                )
+                for item in journals if item["status"] == "DRAFT"
+            ]
+            journal_choice = ft.Dropdown(
+                label="Jurnal kelas", width=560, options=journal_options,
+            )
             material = field("Materi pembelajaran", multiline=True, width=600)
             start_time = field("Jam mulai aktual", "07:00")
             end_time = field("Jam selesai aktual", "07:45")
+            slot_checks = []
+            schedule_info = ft.Column(spacing=4)
+
+            def load_journal_slots(_):
+                slot_checks.clear()
+                schedule_info.controls.clear()
+                if not journal_choice.value:
+                    notify("Pilih jurnal terlebih dahulu.", True)
+                    return
+                selected_journal = next(
+                    item for item in journals if item["id"] == int(journal_choice.value)
+                )
+                schedule = load_data(
+                    f"/classes/{selected_journal['class_id']}/daily-schedule",
+                    {"on_date": selected_journal["journal_date"]},
+                )
+                for slot in schedule.get("slots", []):
+                    if slot["slot_type"] != "LESSON" or slot["jp_number"] is None:
+                        continue
+                    label = (
+                        f"JP {slot['jp_number']} • {slot['start_time']}-{slot['end_time']} • "
+                        f"{slot['subject_name'] or 'Mapel belum diatur'} • "
+                        f"{slot['scheduled_teacher_name'] or 'Guru belum diatur'}"
+                    )
+                    check = ft.Checkbox(
+                        label=label, value=False, data=slot["slot_id"]
+                    )
+                    slot_checks.append(check)
+                    schedule_info.controls.append(check)
+                if not slot_checks:
+                    schedule_info.controls.append(
+                        ft.Text("Tidak ada slot pelajaran pada tanggal jurnal ini.")
+                    )
+                page.update()
 
             def create_session(_):
                 try:
+                    if not journal_choice.value:
+                        raise RuntimeError("Pilih jurnal terlebih dahulu.")
                     selected_slots = [
-                        int(value.strip()) for value in slot_ids.value.split(",") if value.strip()
+                        int(check.data) for check in slot_checks if check.value
                     ]
-                    result = api.post(f"/journals/{int(journal_id.value)}/sessions", {
-                        "slot_ids": selected_slots,
-                        "teacher_id": user["id"],
-                        "material": material.value.strip(),
-                        "actual_start_time": start_time.value.strip(),
-                        "actual_end_time": end_time.value.strip(),
-                    })
+                    if not selected_slots:
+                        raise RuntimeError("Pilih minimal satu JP.")
+                    result = api.post(
+                        f"/journals/{int(journal_choice.value)}/sessions",
+                        {
+                            "slot_ids": selected_slots,
+                            "teacher_id": user["id"],
+                            "material": material.value.strip(),
+                            "actual_start_time": start_time.value.strip(),
+                            "actual_end_time": end_time.value.strip(),
+                        },
+                    )
                     notify(f"Sesi pembelajaran berhasil dibuat. ID sesi: {result['id']}")
+                    load_sessions(None)
                 except Exception as error:
                     notify(str(error), True)
 
             section("Isi sesi pembelajaran", [
-                ft.Text("Gunakan ID slot dari jadwal kelas. Sesi hanya dapat dibuat untuk jurnal DRAFT."),
-                journal_id, slot_ids, material,
+                ft.Text("Pilih jurnal, muat jadwal, lalu centang satu atau beberapa JP berurutan."),
+                journal_choice, button("Muat jadwal JP", load_journal_slots),
+                schedule_info, material,
                 ft.Row([start_time, end_time]),
                 button("Simpan sesi", create_session, True),
             ])
 
-            session_id = field("ID sesi untuk absensi")
-            attendance_slot_id = field("ID slot JP")
-            student_id = field("ID siswa")
+            session_choice = ft.Dropdown(
+                label="Sesi pembelajaran", width=560, options=[],
+            )
+            attendance_slot = ft.Dropdown(
+                label="JP untuk absensi", width=320, options=[],
+            )
+            student_choice = ft.Dropdown(
+                label="Siswa", width=420, options=[],
+            )
             attendance_status = ft.Dropdown(
                 label="Status kehadiran", width=320, value="PRESENT",
                 options=[
@@ -571,22 +737,91 @@ def main(page: ft.Page):
                     ft.DropdownOption(key="ABSENT", text="Alpa"),
                 ],
             )
+            loaded_sessions = []
+
+            def load_sessions(_):
+                session_choice.options = []
+                attendance_slot.options = []
+                student_choice.options = []
+                loaded_sessions.clear()
+                if not journal_choice.value:
+                    page.update()
+                    return
+                loaded_sessions.extend(
+                    api.get(f"/journals/{int(journal_choice.value)}/sessions")
+                )
+                session_choice.options = [
+                    ft.DropdownOption(
+                        key=str(item["id"]),
+                        text=f"Sesi #{item['id']} • {item['subject_name']} • JP {', '.join(map(str, item['jp_numbers']))}",
+                    )
+                    for item in loaded_sessions
+                ]
+                if loaded_sessions:
+                    session_choice.value = str(loaded_sessions[-1]["id"])
+                    load_session_options(None)
+                page.update()
+
+            def load_session_options(_):
+                selected = next(
+                    (item for item in loaded_sessions
+                     if str(item["id"]) == session_choice.value),
+                    None,
+                )
+                if selected is None:
+                    attendance_slot.options = []
+                    student_choice.options = []
+                    page.update()
+                    return
+                attendance_slot.options = [
+                    ft.DropdownOption(
+                        key=str(slot_id), text=f"JP {jp_number}"
+                    )
+                    for slot_id, jp_number in zip(
+                        selected["slot_ids"], selected["jp_numbers"]
+                    )
+                ]
+                attendance_slot.value = (
+                    attendance_slot.options[0].key if attendance_slot.options else None
+                )
+                selected_journal = next(
+                    item for item in journals if item["id"] == int(journal_choice.value)
+                )
+                students = load_data(
+                    "/students", {"class_id": selected_journal["class_id"]}
+                )
+                student_choice.options = [
+                    ft.DropdownOption(
+                        key=str(student["id"]), text=student["full_name"]
+                    )
+                    for student in students if student["is_active"]
+                ]
+                student_choice.value = None
+                page.update()
+
+            session_choice.on_change = load_session_options
 
             def save_attendance(_):
                 try:
-                    api.post(f"/journal-sessions/{int(session_id.value)}/attendance", {
-                        "slot_id": int(attendance_slot_id.value),
-                        "student_id": int(student_id.value),
-                        "teacher_id": user["id"],
-                        "attendance_status": attendance_status.value,
-                    })
+                    if not session_choice.value or not attendance_slot.value or not student_choice.value:
+                        raise RuntimeError("Pilih sesi, JP, dan siswa terlebih dahulu.")
+                    api.post(
+                        f"/journal-sessions/{int(session_choice.value)}/attendance",
+                        {
+                            "slot_id": int(attendance_slot.value),
+                            "student_id": int(student_choice.value),
+                            "teacher_id": user["id"],
+                            "attendance_status": attendance_status.value,
+                        },
+                    )
                     notify("Absensi siswa berhasil disimpan.")
                 except Exception as error:
                     notify(str(error), True)
 
             section("Input absensi siswa", [
-                ft.Text("Input satu siswa per penyimpanan. Hanya guru pengajar sesi yang dapat mengisi."),
-                session_id, attendance_slot_id, student_id, attendance_status,
+                ft.Text("Daftar sesi, JP, dan siswa diambil dari jurnal yang dipilih."),
+                button("Muat / perbarui daftar sesi", load_sessions),
+                session_choice, attendance_slot, student_choice, attendance_status,
                 button("Simpan absensi", save_attendance, True),
             ])
 
