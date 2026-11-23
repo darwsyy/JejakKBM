@@ -4,14 +4,16 @@ Sistem jurnal Kegiatan Belajar Mengajar (KBM) digital.
 
 ## Status proyek
 
-Tahap backend: API jurnal KBM, absensi, autentikasi, notifikasi, audit log, dan database lokal. GUI Android belum dibuat.
+Backend FastAPI dan database SQLite sudah tersedia. GUI aplikasi dibuat menggunakan Python + Flet dan berkomunikasi dengan backend melalui HTTP API.
 
 ## Teknologi
 
 - Python 3.14
+- Flet untuk GUI Python
 - FastAPI dan Uvicorn untuk backend API
+- HTTPX untuk mengirim request dari GUI ke backend
 - SQLite untuk database lokal
-- SQLAlchemy untuk menghubungkan Python dengan database
+- SQLAlchemy untuk menghubungkan backend Python dengan database
 - pytest untuk pengujian
 
 ## Persiapan Windows (PowerShell)

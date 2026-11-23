@@ -1,49 +1,10 @@
 """Antarmuka JejakKBM menggunakan Python dan Flet."""
 
-import os
 from datetime import date
 
 import flet as ft
-import httpx
 
-API_URL = os.getenv("JEJAKKBM_API_URL", "http://127.0.0.1:8000")
-
-
-class ApiClient:
-    def __init__(self):
-        self.token = None
-
-    def request(self, method, path, data=None, params=None):
-        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
-        try:
-            response = httpx.request(
-                method, f"{API_URL}{path}", json=data, params=params,
-                headers=headers, timeout=15,
-            )
-        except httpx.RequestError as error:
-            raise RuntimeError(
-                "Backend belum berjalan. Jalankan FastAPI di port 8000 terlebih dahulu."
-            ) from error
-
-        if response.status_code >= 400:
-            try:
-                detail = response.json().get("detail", response.text)
-            except ValueError:
-                detail = response.text
-            raise RuntimeError(f"{response.status_code}: {detail}")
-
-        if response.status_code == 204 or not response.content:
-            return None
-        return response.json()
-
-    def get(self, path, params=None):
-        return self.request("GET", path, params=params)
-
-    def post(self, path, data):
-        return self.request("POST", path, data=data)
-
-    def put(self, path, data=None):
-        return self.request("PUT", path, data=data)
+from frontend.api import ApiClient
 
 
 def main(page: ft.Page):
@@ -511,7 +472,12 @@ def main(page: ft.Page):
             ])
 
         elif role == "teacher":
-            inbox = load_data("/reviews/inbox")
+            duty_rosters = load_data("/duty-rosters", {"duty_date": str(date.today())})
+            is_duty_teacher = any(
+                roster["teacher_user_id"] == user["id"]
+                for roster in duty_rosters
+            )
+            inbox = load_data("/reviews/inbox") if is_duty_teacher else []
             notifications = load_data("/notifications", {"user_id": user["id"]})
             section("Notifikasi", [
                 ft.Text(
@@ -557,7 +523,11 @@ def main(page: ft.Page):
                     ])
                 ])
             section("Antrean pemeriksaan guru piket", review_controls or [
-                ft.Text("Tidak ada jurnal yang menunggu pemeriksaan.")
+                ft.Text(
+                    "Tidak ada jurnal yang menunggu pemeriksaan."
+                    if is_duty_teacher
+                    else "Kamu tidak dijadwalkan sebagai guru piket hari ini. Fitur mengajar tetap tersedia."
+                )
             ])
 
             journal_id = field("ID jurnal untuk mengisi sesi")
