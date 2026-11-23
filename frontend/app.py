@@ -361,6 +361,122 @@ def main(page: ft.Page):
             ])
             refresh_student_list()
 
+            # Profil guru dihubungkan ke akun dengan role teacher.
+            teacher_records = []
+            teacher_account = ft.Dropdown(
+                label="Akun guru yang belum memiliki profil", width=420,
+                options=[],
+            )
+            teacher_nip = field("NIP guru (opsional)", width=320)
+            teacher_to_edit = ft.Dropdown(
+                label="Pilih profil guru", width=520, options=[],
+            )
+            teacher_edit_nip = field("Ubah NIP", width=320)
+            teacher_list = ft.Column(spacing=4)
+
+            def refresh_teacher_list(_=None):
+                teacher_records.clear()
+                teacher_records.extend(api.get("/teachers"))
+                linked_user_ids = {item["user_id"] for item in teacher_records}
+                available_accounts = [
+                    account for account in users
+                    if account["role"] == "teacher"
+                    and account.get("is_active", True)
+                    and account["id"] not in linked_user_ids
+                ]
+                teacher_account.options = [
+                    ft.DropdownOption(
+                        key=str(account["id"]),
+                        text=f"{account['full_name']} • {account['username']}",
+                    )
+                    for account in available_accounts
+                ]
+                teacher_account.value = None
+                teacher_to_edit.options = [
+                    ft.DropdownOption(
+                        key=str(item["id"]),
+                        text=f"{item['full_name']} • {item['username']} "
+                             f"({'Aktif' if item['is_active'] else 'Nonaktif'})",
+                    )
+                    for item in teacher_records
+                ]
+                teacher_to_edit.value = None
+                teacher_list.controls = [
+                    ft.Text(
+                        f"{item['full_name']} • Akun: {item['username']} • "
+                        f"NIP: {item['nip'] or '-'} • "
+                        f"{'Aktif' if item['is_active'] else 'Nonaktif'}"
+                    )
+                    for item in teacher_records
+                ] or [ft.Text("Belum ada profil guru.")]
+                page.update()
+
+            def load_teacher_to_edit(_=None):
+                selected = next(
+                    (item for item in teacher_records
+                     if str(item["id"]) == teacher_to_edit.value),
+                    None,
+                )
+                if selected is None:
+                    return
+                teacher_edit_nip.value = selected["nip"] or ""
+                page.update()
+
+            teacher_to_edit.on_change = load_teacher_to_edit
+
+            def create_teacher_profile(_):
+                try:
+                    if not teacher_account.value:
+                        raise RuntimeError("Pilih akun guru yang belum memiliki profil.")
+                    result = api.post("/teachers", {
+                        "user_id": int(teacher_account.value),
+                        "nip": teacher_nip.value.strip() or None,
+                    })
+                    notify(f"Profil guru {result['full_name']} berhasil dibuat.")
+                    refresh_teacher_list()
+                except Exception as error:
+                    notify(str(error), True)
+
+            def update_teacher_profile(_):
+                try:
+                    if not teacher_to_edit.value:
+                        raise RuntimeError("Pilih profil guru yang akan diubah.")
+                    teacher_id = int(teacher_to_edit.value)
+                    api.put(f"/teachers/{teacher_id}", {
+                        "nip": teacher_edit_nip.value.strip() or None,
+                    })
+                    notify("NIP guru berhasil diperbarui.")
+                    refresh_teacher_list()
+                except Exception as error:
+                    notify(str(error), True)
+
+            def deactivate_teacher_profile(_):
+                try:
+                    if not teacher_to_edit.value:
+                        raise RuntimeError("Pilih profil guru yang akan dinonaktifkan.")
+                    teacher_id = int(teacher_to_edit.value)
+                    api.request("DELETE", f"/teachers/{teacher_id}")
+                    notify("Profil guru dinonaktifkan. Riwayat terkait tetap tersimpan.")
+                    refresh_teacher_list()
+                except Exception as error:
+                    notify(str(error), True)
+
+            section("Tambah profil guru", [
+                ft.Text("Pilih akun ber-role Guru yang belum terhubung ke profil guru."),
+                teacher_account, teacher_nip,
+                button("Hubungkan akun dan buat profil", create_teacher_profile, True),
+            ])
+            section("Daftar dan pengelolaan guru", [
+                button("Muat ulang daftar guru", refresh_teacher_list),
+                teacher_list,
+                teacher_to_edit, teacher_edit_nip,
+                ft.Row([
+                    button("Simpan perubahan NIP", update_teacher_profile, True),
+                    button("Nonaktifkan profil", deactivate_teacher_profile),
+                ]),
+            ])
+            refresh_teacher_list()
+
             officers = [u for u in users if u["role"] == "class_officer"]
             officer_class = ft.Dropdown(
                 label="Kelas untuk petugas", width=320,
