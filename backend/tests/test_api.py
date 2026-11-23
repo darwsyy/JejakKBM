@@ -1991,3 +1991,41 @@ def test_lesson_schedule_slot_requires_jp_number(client):
         },
     )
     assert response.status_code == 422
+
+
+def test_schedule_slot_used_by_journal_cannot_be_deleted(client):
+    session, teacher, student, slot_ids = setup_session_with_student(client)
+
+    response = client.delete(f"/schedule-slots/{slot_ids[0]}")
+
+    assert response.status_code == 409
+    assert "riwayat jurnal" in response.json()["detail"].lower()
+    schedule = client.get("/classes/1/schedule-slots?day=Monday")
+    assert any(slot["id"] == slot_ids[0] for slot in schedule.json())
+
+
+def test_approved_journal_cannot_be_changed_again(client):
+    session, teacher = submit_ready_journal(client)
+    approved = client.post(f"/journals/{session['journal_id']}/review", json={
+        "reviewer_user_id": teacher["id"],
+        "decision": "APPROVE",
+    })
+    assert approved.status_code == 201
+
+    session_update = client.put(f"/journal-sessions/{session['id']}", json={
+        "material": "Perubahan setelah disetujui",
+        "actual_start_time": "08:35",
+        "actual_end_time": "09:55",
+    })
+    attendance = client.get(f"/journal-sessions/{session['id']}/attendance").json()
+    attendance_update = client.put(f"/attendance/{attendance[0]['id']}", json={
+        "teacher_id": teacher["id"],
+        "attendance_status": "ABSENT",
+    })
+    resubmit = client.post(f"/journals/{session['journal_id']}/submit", json={
+        "officer_user_id": 1,
+    })
+
+    assert session_update.status_code == 400
+    assert attendance_update.status_code == 400
+    assert resubmit.status_code == 400

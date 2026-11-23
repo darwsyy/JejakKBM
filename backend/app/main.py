@@ -631,6 +631,20 @@ def delete_schedule_slot(slot_id: int, db: Session = Depends(get_db)):
             detail="Slot jadwal tidak ditemukan.",
         )
 
+    # Slot yang sudah dipakai jurnal lama tidak boleh dihapus karena
+    # absensi dan riwayat sesi masih merujuk ke slot tersebut.
+    used_in_session = db.query(JournalSessionSlot).filter(
+        JournalSessionSlot.slot_id == slot_id
+    ).first()
+    has_absence_report = db.query(TeacherAbsenceReport).filter(
+        TeacherAbsenceReport.slot_id == slot_id
+    ).first()
+    if used_in_session is not None or has_absence_report is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Slot sudah digunakan dalam riwayat jurnal dan tidak dapat dihapus.",
+        )
+
     assignment = db.query(ScheduleTeacherAssignment).filter(
         ScheduleTeacherAssignment.slot_id == slot_id
     ).first()

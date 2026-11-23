@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 # SQLite dipakai untuk pengembangan lokal agar setup tetap sederhana.
@@ -8,6 +8,15 @@ engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False},
 )
+
+
+@event.listens_for(engine, "connect")
+def enable_sqlite_foreign_keys(connection, _record):
+    """Aktifkan pemeriksaan relasi agar data terkait tidak terhapus sembarangan."""
+    cursor = connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
 
 SessionLocal = sessionmaker(
     bind=engine,

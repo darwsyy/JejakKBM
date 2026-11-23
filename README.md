@@ -250,3 +250,11 @@ $env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
 - `GET /reports/attendance.csv?class_id=1&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` mengunduh rekap yang sama dalam format CSV.
 - Kedua laporan hanya dapat dibuka oleh akun admin.
 - Rentang laporan maksimal 366 hari agar permintaan tetap ringan.
+
+
+### Perlindungan riwayat jurnal
+
+- Slot jadwal yang sudah digunakan oleh sesi jurnal atau laporan ketidakhadiran tidak dapat dihapus. Backend mengembalikan HTTP 409 agar data absensi dan riwayat jurnal lama tetap utuh.
+- Siswa dan profil guru dinonaktifkan, bukan dihapus permanen, sehingga catatan historis tetap dapat ditelusuri.
+- Jurnal yang sudah dikirim atau diperiksa tidak dapat diubah melalui endpoint sesi dan absensi. Perbaikan hanya dilakukan setelah jurnal berstatus `REVISION_REQUIRED` dan petugas memulai revisi.
+- SQLite sekarang mengaktifkan pemeriksaan foreign key pada koneksi aplikasi. Relasi yang masih dipakai tidak bisa dihapus diam-diam; data harus tetap konsisten.

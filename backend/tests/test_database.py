@@ -1,8 +1,15 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.database import Base
+from app.database import Base, engine
 from app.models import User
+
+
+def test_application_database_enforces_foreign_keys():
+    with engine.connect() as connection:
+        enabled = connection.exec_driver_sql("PRAGMA foreign_keys").scalar()
+
+    assert enabled == 1
 
 
 def test_user_can_be_saved_to_database(tmp_path) -> None:
