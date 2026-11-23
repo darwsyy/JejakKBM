@@ -230,12 +230,80 @@ def main(page: ft.Page):
                 button("Tambah kelas", create_class, True),
             ])
 
+            class_options = [
+                ft.DropdownOption(key=str(c["id"]), text=c["name"])
+                for c in classes
+            ]
             student_nis = field("NIS siswa")
             student_full_name = field("Nama siswa")
             student_class = ft.Dropdown(
                 label="Kelas siswa", width=320,
-                options=[ft.DropdownOption(key=str(c["id"]), text=f"{c['name']} (ID {c['id']})") for c in classes],
+                options=class_options,
             )
+            student_filter_class = ft.Dropdown(
+                label="Tampilkan siswa kelas", width=320,
+                options=class_options,
+                value=str(classes[0]["id"]) if classes else None,
+            )
+            student_to_edit = ft.Dropdown(
+                label="Pilih siswa untuk diedit", width=520, options=[],
+            )
+            student_edit_nis = field("NIS", width=250)
+            student_edit_name = field("Nama lengkap", width=400)
+            student_edit_class = ft.Dropdown(
+                label="Pindahkan ke kelas", width=320,
+                options=class_options,
+            )
+            student_list = ft.Column(spacing=4)
+            loaded_students = []
+
+            def refresh_student_list(_=None):
+                loaded_students.clear()
+                student_list.controls.clear()
+                student_to_edit.options = []
+                student_to_edit.value = None
+                if not student_filter_class.value:
+                    student_list.controls.append(ft.Text("Buat kelas terlebih dahulu."))
+                    page.update()
+                    return
+                loaded_students.extend(api.get(
+                    "/students",
+                    {"class_id": int(student_filter_class.value)},
+                ))
+                student_to_edit.options = [
+                    ft.DropdownOption(
+                        key=str(item["id"]),
+                        text=(
+                            f"{item['full_name']} • NIS {item['nis']} "
+                            f"({'Aktif' if item['is_active'] else 'Nonaktif'})"
+                        ),
+                    )
+                    for item in loaded_students
+                ]
+                student_list.controls.extend([
+                    ft.Text(
+                        f"{item['full_name']} • NIS {item['nis']} • "
+                        f"{'Aktif' if item['is_active'] else 'Nonaktif'}"
+                    )
+                    for item in loaded_students
+                ] or [ft.Text("Belum ada siswa di kelas ini.")])
+                page.update()
+
+            def load_student_to_edit(_=None):
+                selected = next(
+                    (item for item in loaded_students
+                     if str(item["id"]) == student_to_edit.value),
+                    None,
+                )
+                if selected is None:
+                    return
+                student_edit_nis.value = selected["nis"]
+                student_edit_name.value = selected["full_name"]
+                student_edit_class.value = str(selected["class_id"])
+                page.update()
+
+            student_to_edit.on_change = load_student_to_edit
+            student_filter_class.on_change = refresh_student_list
 
             def create_student(_):
                 try:
@@ -245,6 +313,33 @@ def main(page: ft.Page):
                         "class_id": int(student_class.value),
                     })
                     notify(f"Siswa dibuat. ID siswa: {result['id']}")
+                    refresh_student_list()
+                except Exception as error:
+                    notify(str(error), True)
+
+            def update_student(_):
+                try:
+                    if not student_to_edit.value:
+                        raise RuntimeError("Pilih siswa yang akan diubah.")
+                    student_id = int(student_to_edit.value)
+                    api.put(f"/students/{student_id}", {
+                        "nis": student_edit_nis.value.strip(),
+                        "full_name": student_edit_name.value.strip(),
+                        "class_id": int(student_edit_class.value),
+                    })
+                    notify("Data siswa berhasil diperbarui.")
+                    refresh_student_list()
+                except Exception as error:
+                    notify(str(error), True)
+
+            def deactivate_student(_):
+                try:
+                    if not student_to_edit.value:
+                        raise RuntimeError("Pilih siswa yang akan dinonaktifkan.")
+                    student_id = int(student_to_edit.value)
+                    api.request("DELETE", f"/students/{student_id}")
+                    notify("Siswa dinonaktifkan. Riwayat absensinya tetap tersimpan.")
+                    refresh_student_list()
                 except Exception as error:
                     notify(str(error), True)
 
@@ -252,6 +347,19 @@ def main(page: ft.Page):
                 student_nis, student_full_name, student_class,
                 button("Simpan siswa", create_student),
             ])
+            section("Daftar dan pengelolaan siswa", [
+                student_filter_class,
+                button("Muat ulang daftar siswa", refresh_student_list),
+                student_list,
+                student_to_edit,
+                ft.Row([student_edit_nis, student_edit_name]),
+                student_edit_class,
+                ft.Row([
+                    button("Simpan perubahan", update_student, True),
+                    button("Nonaktifkan siswa", deactivate_student),
+                ]),
+            ])
+            refresh_student_list()
 
             officers = [u for u in users if u["role"] == "class_officer"]
             officer_class = ft.Dropdown(
