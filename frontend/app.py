@@ -919,12 +919,112 @@ def main(page: ft.Page):
 
         elif role == "teacher":
             current_schedule_area = ft.Column(spacing=6)
+            current_slot_data = {"slot": None}
+            quick_material = field("Materi pembelajaran", multiline=True, width=600)
+            quick_start = field("Jam mulai aktual (HH:MM)", "")
+            quick_end = field("Jam selesai aktual (HH:MM)", "")
+            quick_attendance_area = ft.Column(spacing=8)
+            quick_attendance_state = {
+                "session_id": None, "slot_id": None, "slot": None,
+            }
+            quick_attendance_rows = []
+            quick_attendance_status_options = [
+                ft.DropdownOption(key="PRESENT", text="Hadir"),
+                ft.DropdownOption(key="SICK", text="Sakit"),
+                ft.DropdownOption(key="PERMITTED", text="Izin"),
+                ft.DropdownOption(key="DISPENSED", text="Dispensasi"),
+                ft.DropdownOption(key="ABSENT", text="Alpa"),
+            ]
+
+            def load_quick_attendance(session_id, slot):
+                quick_attendance_state["session_id"] = session_id
+                quick_attendance_state["slot_id"] = slot["slot_id"]
+                quick_attendance_state["slot"] = slot
+                quick_attendance_rows.clear()
+                quick_attendance_area.controls.clear()
+
+                roster = api.get(f"/classes/{slot['class_id']}/roster")
+                existing = api.get(
+                    f"/journal-sessions/{session_id}/class-attendance"
+                )
+                recorded = {
+                    item["attendance_number"] for item in existing
+                    if item["slot_id"] == slot["slot_id"]
+                }
+                active_roster = [
+                    item for item in roster if item["is_active"]
+                ]
+                quick_attendance_area.controls.append(
+                    ft.Text(
+                        f"Absensi {slot['class_name']} • JP {slot['jp_number']} "
+                        f"• Sudah tercatat {len(recorded)}/{len(active_roster)} nomor"
+                    )
+                )
+
+                for item in active_roster:
+                    number = item["attendance_number"]
+                    if number in recorded:
+                        continue
+                    status_choice = ft.Dropdown(
+                        width=150,
+                        value="PRESENT",
+                        options=quick_attendance_status_options,
+                    )
+                    quick_attendance_rows.append((number, status_choice))
+                    quick_attendance_area.controls.append(
+                        ft.Row([
+                            ft.Text(f"No. Absen {number}", width=300),
+                            status_choice,
+                        ])
+                    )
+
+                if not quick_attendance_rows:
+                    quick_attendance_area.controls.append(
+                        ft.Text("Semua nomor absen aktif sudah tercatat.")
+                    )
+                else:
+                    quick_attendance_area.controls.append(
+                        button("Simpan absensi kelas", save_quick_attendance, True)
+                    )
+                page.update()
+
+            def save_quick_attendance(_):
+                try:
+                    session_id = quick_attendance_state["session_id"]
+                    slot_id = quick_attendance_state["slot_id"]
+                    if not session_id or not slot_id:
+                        raise RuntimeError("Buat sesi pembelajaran terlebih dahulu.")
+                    if not quick_attendance_rows:
+                        raise RuntimeError("Tidak ada nomor absen baru yang perlu dicatat.")
+                    api.post(
+                        f"/journal-sessions/{session_id}/class-attendance",
+                        {
+                            "slot_id": slot_id,
+                            "teacher_id": user["id"],
+                            "records": [
+                                {
+                                    "attendance_number": number,
+                                    "attendance_status": status.value,
+                                }
+                                for number, status in quick_attendance_rows
+                            ],
+                        },
+                    )
+                    notify(
+                        f"Absensi {len(quick_attendance_rows)} nomor berhasil disimpan."
+                    )
+                    slot = quick_attendance_state["slot"]
+                    if slot:
+                        load_quick_attendance(session_id, slot)
+                except Exception as error:
+                    notify(str(error), True)
 
             def refresh_teacher_current_schedule(_=None):
                 try:
                     result = api.get("/teachers/me/current-schedule")
                     current_schedule_area.controls.clear()
                     current = result.get("current_slot")
+                    current_slot_data["slot"] = current
                     if current:
                         current_schedule_area.controls.append(
                             ft.Text(
@@ -966,10 +1066,43 @@ def main(page: ft.Page):
                 except Exception as error:
                     notify(str(error), True)
 
+            def start_current_lesson(_):
+                try:
+                    current = current_slot_data["slot"]
+                    if not current:
+                        raise RuntimeError("Tidak ada JP aktif pada jadwal Anda.")
+                    if current["session_id"]:
+                        raise RuntimeError("JP ini sudah memiliki sesi pembelajaran.")
+                    if not quick_material.value.strip():
+                        raise RuntimeError("Isi materi pembelajaran terlebih dahulu.")
+                    result = api.post("/teachers/me/current-session", {
+                        "slot_id": current["slot_id"],
+                        "material": quick_material.value.strip(),
+                        "actual_start_time": quick_start.value.strip() or None,
+                        "actual_end_time": quick_end.value.strip() or None,
+                    })
+                    notify(
+                        f"Sesi berhasil dibuat: {current['class_name']} • "
+                        f"{current['subject_name']} • JP {current['jp_number']}. "
+                        "Lanjutkan dengan mengisi absensi di bawah."
+                    )
+                    load_quick_attendance(result["id"], current)
+                    quick_material.value = ""
+                    refresh_teacher_current_schedule()
+                except Exception as error:
+                    notify(str(error), True)
+
             section("Jadwal mengajar hari ini", [
                 ft.Text("Jadwal dibaca otomatis berdasarkan waktu WIB dan penugasan guru."),
                 button("Perbarui jadwal sekarang", refresh_teacher_current_schedule, True),
                 current_schedule_area,
+                ft.Text("Mulai sesi dari JP yang sedang berlangsung. Kelas dan mapel diambil otomatis dari jadwal."),
+                quick_material,
+                ft.Row([quick_start, quick_end]),
+                button("Mulai / simpan sesi JP aktif", start_current_lesson, True),
+                ft.Divider(),
+                ft.Text("Langkah berikutnya: absensi kelas", weight=ft.FontWeight.BOLD),
+                quick_attendance_area,
             ])
             refresh_teacher_current_schedule()
 

@@ -37,6 +37,7 @@ from app.schemas import (
     JournalSessionUpdate,
     AttendanceUpdate,
     JournalSessionCreate,
+    TeacherCurrentSessionCreate,
     JournalSessionResponse,
     AttendanceCreate,
     AttendanceResponse,
@@ -1499,6 +1500,84 @@ def get_teacher_current_schedule(
         "current_slot": current_slot,
         "today_slots": slots,
     }
+
+
+@app.post(
+    "/teachers/me/current-session",
+    response_model=JournalSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Journal Sessions"],
+)
+def create_session_for_current_teacher_slot(
+    data: TeacherCurrentSessionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Fitur ini hanya untuk akun guru.")
+
+    now = datetime.now(ZoneInfo("Asia/Jakarta"))
+    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == data.slot_id).first()
+    if slot is None or slot.slot_type != "LESSON" or slot.jp_number is None:
+        raise HTTPException(status_code=404, detail="Slot pelajaran tidak ditemukan.")
+
+    if slot.day_of_week != now.strftime("%A"):
+        raise HTTPException(status_code=400, detail="Slot bukan bagian dari jadwal hari ini.")
+
+    teacher_assignment = db.query(ScheduleTeacherAssignment).filter(
+        ScheduleTeacherAssignment.slot_id == slot.id,
+        ScheduleTeacherAssignment.teacher_id == current_user.id,
+    ).first()
+    if teacher_assignment is None:
+        raise HTTPException(status_code=403, detail="Slot ini bukan jadwal mengajar akun Anda.")
+
+    subject_assignment = db.query(ScheduleSubjectAssignment).filter(
+        ScheduleSubjectAssignment.slot_id == slot.id
+    ).first()
+    if subject_assignment is None:
+        raise HTTPException(status_code=400, detail="Mapel untuk JP ini belum diatur admin.")
+
+    officer_period = db.query(ClassOfficerPeriod).filter(
+        ClassOfficerPeriod.class_id == slot.class_id,
+        ClassOfficerPeriod.start_date <= now.date(),
+    ).filter(
+        (ClassOfficerPeriod.end_date.is_(None))
+        | (ClassOfficerPeriod.end_date >= now.date())
+    ).first()
+    if officer_period is None:
+        raise HTTPException(status_code=409, detail="Kelas belum memiliki petugas kelas aktif untuk hari ini.")
+
+    journal = db.query(DailyJournal).filter(
+        DailyJournal.class_id == slot.class_id,
+        DailyJournal.journal_date == now.date(),
+    ).first()
+    if journal is None:
+        journal = DailyJournal(
+            class_id=slot.class_id,
+            journal_date=now.date(),
+            officer_user_id=officer_period.user_id,
+            status="DRAFT",
+        )
+        db.add(journal)
+        db.flush()
+        add_audit_log(db, current_user.id, "JOURNAL_AUTO_CREATED", "DailyJournal", journal.id, "Jurnal dibuat otomatis saat guru memulai sesi.")
+        db.commit()
+        db.refresh(journal)
+    if journal.status != "DRAFT":
+        raise HTTPException(status_code=409, detail="Jurnal hari ini tidak lagi berstatus DRAFT.")
+
+    start_time = data.actual_start_time or now.strftime("%H:%M")
+    end_time = data.actual_end_time or slot.end_time
+    session_data = JournalSessionCreate(
+        slot_ids=[slot.id],
+        teacher_id=current_user.id,
+        material=data.material,
+        actual_start_time=start_time,
+        actual_end_time=end_time,
+    )
+    return create_journal_session(
+        journal.id, session_data, db=db, current_user=current_user
+    )
 
 
 @app.post(

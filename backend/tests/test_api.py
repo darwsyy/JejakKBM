@@ -2019,6 +2019,20 @@ def test_logged_in_user_cannot_act_as_another_user(client):
 
 
 
+def test_current_session_endpoint_rejects_non_teacher(client):
+    admin = create_user(client, "admin_current_session", role="admin").json()
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=admin["id"], username=admin["username"],
+        full_name=admin["full_name"], role="admin",
+        is_active=True, password_hash=None, token_version=0,
+    )
+    response = client.post(
+        "/teachers/me/current-session",
+        json={"slot_id": 1, "material": "Materi pengujian"},
+    )
+    assert response.status_code == 403
+
+
 def test_teacher_current_schedule_uses_wib_and_returns_today_slots(client):
     teacher = create_user(client, "teacher_current_schedule", role="teacher").json()
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(

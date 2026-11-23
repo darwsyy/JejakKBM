@@ -1146,3 +1146,25 @@ Bagian ini memperbarui ketentuan lama yang masih menyebut proses penugasan dan k
 - GUI admin memiliki bagian Rekap absensi per nomor absen; GUI guru menampilkan jadwal mengajar hari ini dan JP yang sedang berlangsung.
 - Catatan: deteksi JP sudah membaca waktu server WIB saat endpoint dipanggil atau saat tombol perbarui ditekan. Pembaruan otomatis berkala belum dibuat. Pembuatan sesi guru masih menggunakan alur jurnal yang sudah ada; integrasi sekali klik dari JP aktif menjadi task berikutnya.
 - Verifikasi: compileall, import Flet, tes matriks, tes jadwal WIB, dan seluruh test suite.
+
+## Update 2026-11-23 — Quick Start Sesi Guru
+
+- Added `POST /teachers/me/current-session` for teachers. It accepts a schedule slot ID and lesson material, optionally actual start/end times.
+- The endpoint verifies the logged-in teacher owns the slot, the slot is a LESSON slot for the current weekday, and the subject assignment exists.
+- It finds the active class-officer period and automatically creates today's DRAFT journal when missing. The journal is attributed to that class's active officer.
+- It then creates a session for the single assigned slot using the existing session validation and audit logic.
+- Teacher GUI now has a quick-start panel under today's WIB schedule: the teacher sees the active class/subject/JP, enters material and (optionally) actual times, then starts/saves the session without selecting a journal or mapel.
+- The previous manual journal/session form remains as a fallback for consecutive JP grouping and older workflows. Attendance entry remains available through the existing session attendance section.
+- Verification: compileall, Flet import, all tests (126 passed, 1 dependency deprecation warning), git diff --check.
+- Remaining: manual browser interaction; periodic automatic refresh; make the attendance form auto-follow the newly created quick session; support alternate teacher flow with an approved absence report in the quick-start endpoint.
+
+## Update 2026-11-23 — Absensi Langsung Setelah Quick Start Guru
+
+- Teacher quick-start flow in `frontend/app.py` now keeps the newly created session ID and its active schedule slot in local page state.
+- After `POST /teachers/me/current-session` succeeds, the GUI immediately loads the anonymous class roster using `GET /classes/{class_id}/roster` and existing records using `GET /journal-sessions/{session_id}/class-attendance`.
+- The attendance form appears directly below the quick-start panel, showing the class and JP, recorded count, and only active attendance numbers that have not yet been submitted for that JP.
+- The teacher selects H/S/I/D/A status per remaining number and saves with `POST /journal-sessions/{session_id}/class-attendance`; after saving, the form reloads and shows the updated recorded count.
+- The quick attendance state retains the original slot details so it can refresh after the scheduled JP ends; it does not depend on the current-slot detector still returning an active slot.
+- The older manual journal/session/attendance flow remains available for grouped consecutive JP sessions and fallback use.
+- Verification after this GUI change: Python compileall passed, Flet import passed, backend tests 126 passed with 1 dependency deprecation warning, and `git diff --check` passed.
+- GUI still requires manual browser interaction. In particular, verify the complete teacher flow with a real test class/teacher and confirm that the attendance records appear in the class dashboard/matrix.

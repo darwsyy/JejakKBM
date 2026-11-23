@@ -257,6 +257,13 @@ class DailyJournalResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TeacherCurrentSessionCreate(BaseModel):
+    slot_id: int = Field(ge=1)
+    material: str = Field(min_length=3, max_length=1000)
+    actual_start_time: str | None = Field(default=None, pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    actual_end_time: str | None = Field(default=None, pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+
 class JournalSessionCreate(BaseModel):
     slot_ids: list[int] = Field(min_length=1)
     teacher_id: int = Field(ge=1)
