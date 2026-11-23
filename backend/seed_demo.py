@@ -1,9 +1,9 @@
-from datetime import date
+from datetime import date, timedelta
 
 from app.database import Base, SessionLocal, engine
 from app import models  # noqa: F401 - mendaftarkan semua model
 from app.models import (
-    ClassOfficerPeriod, Classroom, ScheduleSlot, ScheduleSubjectAssignment,
+    ClassOfficerPeriod, Classroom, DutyRoster, ScheduleSlot, ScheduleSubjectAssignment,
     ScheduleTeacherAssignment, Student, Subject, Teacher, User,
 )
 
@@ -45,11 +45,13 @@ def seed_demo(db):
 
     student = db.query(Student).filter(Student.nis == "DEMO1001").first()
     if student is None:
-        db.add(Student(
+        student = Student(
             nis="DEMO1001",
             full_name="Siswa Demo",
             class_id=classroom.id,
-        ))
+        )
+        db.add(student)
+        db.flush()
 
     # Jadwal contoh: dua JP pelajaran berurutan pada hari Senin.
     demo_slots = [
@@ -103,12 +105,34 @@ def seed_demo(db):
             end_date=None,
         ))
 
+    # Pilih Senin terdekat agar jadwal contoh dan jadwal piket cocok.
+    today = date.today()
+    days_until_monday = (7 - today.weekday()) % 7
+    if days_until_monday == 0:
+        days_until_monday = 7
+    duty_date = today + timedelta(days=days_until_monday)
+
+    duty_roster = db.query(DutyRoster).filter(
+        DutyRoster.duty_date == duty_date,
+        DutyRoster.teacher_user_id == teacher_user.id,
+    ).first()
+    if duty_roster is None:
+        db.add(DutyRoster(
+            duty_date=duty_date,
+            teacher_user_id=teacher_user.id,
+            assigned_by_user_id=admin.id,
+        ))
+
     db.commit()
     return {
         "users": [admin.username, teacher_user.username, officer_user.username],
+        "user_ids": [admin.id, teacher_user.id, officer_user.id],
         "class": classroom.name,
+        "class_id": classroom.id,
         "subject": subject.name,
-        "student": student.nis if student is not None else "DEMO1001",
+        "student": student.nis,
+        "student_id": student.id,
+        "duty_date": duty_date.isoformat(),
     }
 
 

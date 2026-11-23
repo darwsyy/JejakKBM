@@ -46,7 +46,7 @@ Setelah database disiapkan, jalankan:
 python backend/seed_demo.py
 ```
 
-Perintah ini membuat akun demo (`demo_admin`, `demo_guru`, `demo_petugas`), kelas, satu siswa, mata pelajaran, dan jadwal contoh. Aman dijalankan berulang kali karena data yang sudah ada tidak dibuat ulang. Akun demo belum memiliki password; admin perlu mengatur password akun melalui endpoint admin. Gunakan hanya untuk database latihan, bukan data sekolah sungguhan.
+Perintah ini membuat akun demo (`demo_admin`, `demo_guru`, `demo_petugas`), kelas, satu siswa, mata pelajaran, jadwal dua JP pada hari Senin, dan penugasan piket untuk Senin terdekat. Hasil perintah menampilkan ID akun, ID kelas, ID siswa, dan tanggal piket. Aman dijalankan berulang kali karena data yang sudah ada tidak dibuat ulang. Akun demo belum memiliki password; gunakan `demo_admin` saat membuat admin pertama melalui `/auth/bootstrap`, lalu admin mengatur password guru dan petugas melalui endpoint admin. Gunakan hanya untuk database latihan, bukan data sekolah sungguhan.
 
 ## Menjalankan API
 

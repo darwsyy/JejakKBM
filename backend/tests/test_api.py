@@ -1133,6 +1133,9 @@ def submit_ready_journal(client):
 
 def test_review_inbox_and_approve_journal(client):
     session, teacher = submit_ready_journal(client)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=teacher["id"], role="teacher", is_active=True,
+    )
     inbox = client.get("/reviews/inbox")
     assert inbox.status_code == 200
     assert any(item["id"] == session["journal_id"] for item in inbox.json())
@@ -1143,6 +1146,9 @@ def test_review_inbox_and_approve_journal(client):
     assert reviewed.status_code == 201
     assert reviewed.json()["decision"] == "APPROVE"
     assert client.get(f"/journals/{session['journal_id']}").json()["status"] == "APPROVED"
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=1, role="class_officer", is_active=True,
+    )
     officer_notifications = client.get("/notifications?user_id=1").json()
     assert officer_notifications[0]["notification_type"] == "JOURNAL_APPROVED"
     history = client.get(f"/journals/{session['journal_id']}/reviews")
@@ -1229,6 +1235,9 @@ def test_journal_revision_cycle_and_resubmission(client):
     assert resubmitted.json()["status"] == "RESUBMITTED"
     teacher_notifications = client.get(f"/notifications?user_id={teacher['id']}").json()
     assert any(item["notification_type"] == "JOURNAL_RESUBMITTED" for item in teacher_notifications)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=teacher["id"], role="teacher", is_active=True,
+    )
     assert any(item["id"] == journal_id for item in client.get("/reviews/inbox").json())
     assert len(client.get(f"/journals/{journal_id}/reviews").json()) == 1
 
@@ -1945,3 +1954,40 @@ def test_schedule_slot_update_rejects_overlap_but_allows_same_slot(client):
 
     assert same_slot.status_code == 200
     assert overlap.status_code == 409
+
+
+
+def test_review_inbox_only_shows_journals_for_assigned_duty_dates(client):
+    session, assigned_teacher = submit_ready_journal(client)
+    other_teacher = create_user(client, "guru_tidak_piket", role="teacher").json()
+
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=assigned_teacher["id"], role="teacher", is_active=True,
+    )
+    assigned_inbox = client.get("/reviews/inbox")
+    assert assigned_inbox.status_code == 200
+    assert [item["id"] for item in assigned_inbox.json()] == [session["journal_id"]]
+
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=other_teacher["id"], role="teacher", is_active=True,
+    )
+    unassigned_inbox = client.get("/reviews/inbox")
+    assert unassigned_inbox.status_code == 200
+    assert unassigned_inbox.json() == []
+
+
+
+def test_lesson_schedule_slot_requires_jp_number(client):
+    classroom = create_classroom(client, "X TKJ No JP").json()
+    response = client.post(
+        f"/classes/{classroom['id']}/schedule-slots",
+        json={
+            "day_of_week": "Monday",
+            "slot_order": 1,
+            "jp_number": None,
+            "start_time": "07:45",
+            "end_time": "08:30",
+            "slot_type": "LESSON",
+        },
+    )
+    assert response.status_code == 422

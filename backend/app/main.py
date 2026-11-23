@@ -1882,10 +1882,15 @@ def get_review_inbox(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role != "teacher":
-        raise HTTPException(status_code=403, detail="Antrean pemeriksaan hanya untuk akun guru.")
+    if current_user.role != "teacher" or not current_user.is_active:
+        raise HTTPException(status_code=403, detail="Antrean pemeriksaan hanya untuk akun guru aktif.")
+
+    assigned_dates = db.query(DutyRoster.duty_date).filter(
+        DutyRoster.teacher_user_id == current_user.id
+    )
     return db.query(DailyJournal).filter(
-        DailyJournal.status.in_(["SUBMITTED", "RESUBMITTED"])
+        DailyJournal.status.in_(["SUBMITTED", "RESUBMITTED"]),
+        DailyJournal.journal_date.in_(assigned_dates),
     ).order_by(DailyJournal.journal_date, DailyJournal.id).all()
 
 

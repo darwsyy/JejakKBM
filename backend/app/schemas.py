@@ -63,6 +63,9 @@ class ScheduleSlotData(BaseModel):
         if end <= start:
             raise ValueError("Jam selesai harus setelah jam mulai.")
 
+        if self.slot_type == "LESSON" and self.jp_number is None:
+            raise ValueError("Slot LESSON wajib memiliki nomor JP.")
+
         if self.jp_number is not None:
             duration = (end - start).total_seconds() / 60
             if duration != 45:
