@@ -443,13 +443,48 @@ def main(page: ft.Page):
 
         elif role == "class_officer":
             classes = load_data("/classes")
-            journals = load_data("/journals")
-            class_options = [
-                ft.DropdownOption(key=str(c["id"]), text=f"{c['name']} (ID {c['id']})")
-                for c in classes
+            all_journals = load_data("/journals")
+            journals = [
+                item for item in all_journals
+                if item["officer_user_id"] == user["id"]
             ]
-            class_choice = ft.Dropdown(label="Kelas", width=320, options=class_options)
             journal_date = field("Tanggal jurnal", str(date.today()))
+            class_choice = ft.Dropdown(
+                label="Kelas yang ditugaskan", width=360, options=[],
+            )
+
+            def refresh_officer_classes(_=None):
+                class_choice.options = []
+                class_choice.value = None
+                try:
+                    selected_date = journal_date.value.strip()
+                    assigned_classes = []
+                    for classroom in classes:
+                        try:
+                            assignment = api.get(
+                                f"/classes/{classroom['id']}/officer-current",
+                                {"on_date": selected_date},
+                            )
+                        except RuntimeError as error:
+                            if str(error).startswith("404:"):
+                                continue
+                            raise
+                        if assignment["user_id"] == user["id"]:
+                            assigned_classes.append(classroom)
+                    class_choice.options = [
+                        ft.DropdownOption(
+                            key=str(item["id"]), text=item["name"]
+                        )
+                        for item in assigned_classes
+                    ]
+                    if not assigned_classes:
+                        notify("Tidak ada kelas yang ditugaskan ke akun ini pada tanggal tersebut.", True)
+                except Exception as error:
+                    notify(str(error), True)
+                page.update()
+
+            journal_date.on_change = refresh_officer_classes
+            refresh_officer_classes()
 
             def create_journal(_):
                 try:
@@ -480,6 +515,43 @@ def main(page: ft.Page):
                         f"{journal['journal_date']} • {journal['status']}"
                     )
                 )
+                journal_detail = ft.Column(spacing=4)
+
+                def show_officer_journal_detail(
+                    _, class_id=journal["class_id"],
+                    journal_date=journal["journal_date"],
+                    target=journal_detail,
+                ):
+                    try:
+                        detail = api.get(
+                            f"/dashboard/classes/{class_id}",
+                            {"report_date": journal_date},
+                        )
+                        lines = [
+                            f"Status: {detail['journal_status']}",
+                            f"Jumlah sesi: {detail['total_sessions']}",
+                            "Rekap kehadiran: " + ", ".join(
+                                f"{key}: {value}"
+                                for key, value in detail["attendance_counts"].items()
+                            ),
+                        ]
+                        for session in detail["sessions"]:
+                            lines.extend([
+                                f"JP {', '.join(map(str, session['jp_numbers']))} • "
+                                f"{session['subject_name']} • {session['teacher_name']}",
+                                f"Materi: {session['material']}",
+                                f"Waktu aktual: {session['actual_start_time']}-"
+                                f"{session['actual_end_time']}",
+                            ])
+                        target.controls = [ft.Text(line) for line in lines]
+                        page.update()
+                    except Exception as error:
+                        notify(str(error), True)
+
+                journal_rows.append(
+                    button("Lihat ringkasan jurnal", show_officer_journal_detail)
+                )
+                journal_rows.append(journal_detail)
                 if journal["officer_user_id"] == user["id"] and journal["status"] == "DRAFT":
                     def submit_journal(_, journal_id=journal["id"]):
                         try:
@@ -603,6 +675,54 @@ def main(page: ft.Page):
                         weight=ft.FontWeight.BOLD,
                     )
                 )
+                detail_area = ft.Column(spacing=4)
+
+                def show_journal_detail(
+                    _, class_id=journal["class_id"],
+                    journal_date=journal["journal_date"],
+                    target=detail_area,
+                ):
+                    try:
+                        detail = api.get(
+                            f"/dashboard/classes/{class_id}",
+                            {"report_date": journal_date},
+                        )
+                        lines = [
+                            f"Status jurnal: {detail['journal_status']}",
+                            f"Jumlah sesi: {detail['total_sessions']}",
+                            "Rekap kehadiran: " + ", ".join(
+                                f"{key}: {value}"
+                                for key, value in detail["attendance_counts"].items()
+                            ),
+                        ]
+                        for session in detail["sessions"]:
+                            lines.extend([
+                                f"JP {', '.join(map(str, session['jp_numbers']))} • "
+                                f"{session['subject_name']} • {session['teacher_name']}",
+                                f"Materi: {session['material']}",
+                                f"Waktu aktual: {session['actual_start_time']}-"
+                                f"{session['actual_end_time']}",
+                                "Absensi: " + ", ".join(
+                                    f"{key}: {value}"
+                                    for key, value in session["attendance_counts"].items()
+                                ),
+                            ])
+                        if detail["reviews"]:
+                            lines.append("Riwayat pemeriksaan:")
+                            lines.extend(
+                                f"{item['decision']} • {item['reviewer_name']} • "
+                                f"{item['notes'] or '-'}"
+                                for item in detail["reviews"]
+                            )
+                        target.controls = [ft.Text(line) for line in lines]
+                        page.update()
+                    except Exception as error:
+                        notify(str(error), True)
+
+                review_controls.append(
+                    button("Lihat detail jurnal", show_journal_detail)
+                )
+                review_controls.append(detail_area)
                 note = field(f"Catatan jurnal #{journal['id']}", width=600)
 
                 def review(_, journal_id=journal["id"], decision="APPROVE", note_field=note):
@@ -725,24 +845,21 @@ def main(page: ft.Page):
             attendance_slot = ft.Dropdown(
                 label="JP untuk absensi", width=320, options=[],
             )
-            student_choice = ft.Dropdown(
-                label="Siswa", width=420, options=[],
-            )
-            attendance_status = ft.Dropdown(
-                label="Status kehadiran", width=320, value="PRESENT",
-                options=[
-                    ft.DropdownOption(key="PRESENT", text="Hadir"),
-                    ft.DropdownOption(key="SICK", text="Sakit"),
-                    ft.DropdownOption(key="PERMITTED", text="Izin"),
-                    ft.DropdownOption(key="ABSENT", text="Alpa"),
-                ],
-            )
+            attendance_form = ft.Column(spacing=6)
+            attendance_rows = []
+            attendance_status_options = [
+                ft.DropdownOption(key="PRESENT", text="Hadir"),
+                ft.DropdownOption(key="SICK", text="Sakit"),
+                ft.DropdownOption(key="PERMITTED", text="Izin"),
+                ft.DropdownOption(key="ABSENT", text="Alpa"),
+            ]
             loaded_sessions = []
 
             def load_sessions(_):
                 session_choice.options = []
                 attendance_slot.options = []
-                student_choice.options = []
+                attendance_form.controls.clear()
+                attendance_rows.clear()
                 loaded_sessions.clear()
                 if not journal_choice.value:
                     page.update()
@@ -770,7 +887,8 @@ def main(page: ft.Page):
                 )
                 if selected is None:
                     attendance_slot.options = []
-                    student_choice.options = []
+                    attendance_form.controls = [ft.Text("Pilih sesi terlebih dahulu.")]
+                    attendance_rows.clear()
                     page.update()
                     return
                 attendance_slot.options = [
@@ -781,48 +899,84 @@ def main(page: ft.Page):
                         selected["slot_ids"], selected["jp_numbers"]
                     )
                 ]
-                attendance_slot.value = (
-                    attendance_slot.options[0].key if attendance_slot.options else None
-                )
+                valid_slot_ids = [option.key for option in attendance_slot.options]
+                if attendance_slot.value not in valid_slot_ids:
+                    attendance_slot.value = (
+                        attendance_slot.options[0].key
+                        if attendance_slot.options else None
+                    )
                 selected_journal = next(
                     item for item in journals if item["id"] == int(journal_choice.value)
                 )
                 students = load_data(
                     "/students", {"class_id": selected_journal["class_id"]}
                 )
-                student_choice.options = [
-                    ft.DropdownOption(
-                        key=str(student["id"]), text=student["full_name"]
+                existing_records = load_data(
+                    f"/journal-sessions/{selected['id']}/attendance"
+                )
+                recorded_ids = {
+                    item["student_id"] for item in existing_records
+                    if item["slot_id"] == int(attendance_slot.value)
+                }
+                attendance_rows.clear()
+                attendance_form.controls.clear()
+                if recorded_ids:
+                    attendance_form.controls.append(
+                        ft.Text(f"Absensi sudah tercatat untuk {len(recorded_ids)} siswa.")
                     )
-                    for student in students if student["is_active"]
-                ]
-                student_choice.value = None
+                for student in students:
+                    if not student["is_active"] or student["id"] in recorded_ids:
+                        continue
+                    status_choice = ft.Dropdown(
+                        width=150, value="PRESENT",
+                        options=attendance_status_options,
+                    )
+                    attendance_rows.append((student["id"], status_choice))
+                    attendance_form.controls.append(
+                        ft.Row([
+                            ft.Text(student["full_name"], width=300),
+                            status_choice,
+                        ])
+                    )
+                if not attendance_rows:
+                    attendance_form.controls.append(
+                        ft.Text("Semua siswa aktif sudah memiliki catatan absensi untuk sesi ini.")
+                    )
                 page.update()
 
             session_choice.on_change = load_session_options
+            attendance_slot.on_change = load_session_options
 
             def save_attendance(_):
                 try:
-                    if not session_choice.value or not attendance_slot.value or not student_choice.value:
-                        raise RuntimeError("Pilih sesi, JP, dan siswa terlebih dahulu.")
+                    if not session_choice.value or not attendance_slot.value:
+                        raise RuntimeError("Pilih sesi dan JP terlebih dahulu.")
+                    if not attendance_rows:
+                        raise RuntimeError("Tidak ada siswa baru yang perlu dicatat.")
                     api.post(
-                        f"/journal-sessions/{int(session_choice.value)}/attendance",
+                        f"/journal-sessions/{int(session_choice.value)}/attendance/batch",
                         {
                             "slot_id": int(attendance_slot.value),
-                            "student_id": int(student_choice.value),
                             "teacher_id": user["id"],
-                            "attendance_status": attendance_status.value,
+                            "records": [
+                                {
+                                    "student_id": student_id,
+                                    "attendance_status": status_choice.value,
+                                }
+                                for student_id, status_choice in attendance_rows
+                            ],
                         },
                     )
-                    notify("Absensi siswa berhasil disimpan.")
+                    notify(f"Absensi {len(attendance_rows)} siswa berhasil disimpan.")
+                    load_session_options(None)
                 except Exception as error:
                     notify(str(error), True)
 
             section("Input absensi siswa", [
                 ft.Text("Daftar sesi, JP, dan siswa diambil dari jurnal yang dipilih."),
                 button("Muat / perbarui daftar sesi", load_sessions),
-                session_choice, attendance_slot, student_choice, attendance_status,
-                button("Simpan absensi", save_attendance, True),
+                session_choice, attendance_slot, attendance_form,
+                button("Simpan absensi seluruh siswa", save_attendance, True),
             ])
 
         else:
