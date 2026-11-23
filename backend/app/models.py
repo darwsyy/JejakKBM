@@ -101,6 +101,37 @@ class ScheduleSubjectAssignment(Base):
     )
 
 
+class ClassRosterNumber(Base):
+    __tablename__ = "class_roster_numbers"
+    __table_args__ = (
+        UniqueConstraint("class_id", "attendance_number", name="unique_class_attendance_number"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), nullable=False)
+    attendance_number: Mapped[int] = mapped_column(nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class ClassAttendanceRecord(Base):
+    __tablename__ = "class_attendance_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id", "slot_id", "attendance_number",
+            name="unique_class_attendance_per_jp",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("journal_sessions.id"), nullable=False)
+    slot_id: Mapped[int] = mapped_column(ForeignKey("schedule_slots.id"), nullable=False)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id"), nullable=False)
+    attendance_number: Mapped[int] = mapped_column(nullable=False)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    attendance_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    recorded_at: Mapped[object] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
 class Student(Base):
     __tablename__ = "students"
 

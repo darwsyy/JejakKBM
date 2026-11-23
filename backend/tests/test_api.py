@@ -128,6 +128,114 @@ def test_create_and_list_classroom(client):
     assert len(list_response.json()) == 1
 
 
+def test_create_classroom_also_creates_one_officer_account(client):
+    response = client.post(
+        "/classes/create-with-officer",
+        json={
+            "name": "XI TITL 3",
+            "academic_year": "2026/2027",
+            "officer_full_name": "Petugas XI TITL 3",
+            "officer_password": "password123",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["classroom"]["name"] == "XI TITL 3"
+    assert payload["officer"]["username"] == "petugas_xi_titl_3"
+    assert payload["officer"]["role"] == "class_officer"
+
+    users = client.get("/users").json()
+    assert len(users) == 1
+    assert users[0]["username"] == "petugas_xi_titl_3"
+
+    officer = client.get(
+        f"/classes/{payload['classroom']['id']}/officer"
+    )
+    assert officer.status_code == 200
+    assert officer.json()["user_id"] == payload["officer"]["id"]
+
+
+def test_create_classroom_with_officer_creates_configured_attendance_numbers(client):
+    response = client.post(
+        "/classes/create-with-officer",
+        json={
+            "name": "XI RPL 2",
+            "academic_year": "2026/2027",
+            "officer_full_name": "Petugas XI RPL 2",
+            "officer_password": "password123",
+            "roster_size": 36,
+        },
+    )
+    assert response.status_code == 201
+    class_id = response.json()["classroom"]["id"]
+    roster = client.get(f"/classes/{class_id}/roster")
+    assert roster.status_code == 200
+    assert len(roster.json()) == 36
+    assert roster.json()[0]["attendance_number"] == 1
+    assert roster.json()[-1]["attendance_number"] == 36
+
+
+def test_create_classroom_with_officer_rolls_back_on_duplicate_class(client):
+    request_data = {
+        "name": "XI TITL 3",
+        "academic_year": "2026/2027",
+        "officer_full_name": "Petugas XI TITL 3",
+        "officer_password": "password123",
+    }
+    first = client.post("/classes/create-with-officer", json=request_data)
+    second = client.post("/classes/create-with-officer", json=request_data)
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert len(client.get("/classes").json()) == 1
+    assert len(client.get("/users").json()) == 1
+
+
+def test_create_teacher_account_and_code_together(client):
+    response = client.post(
+        "/teachers/create-with-account",
+        json={
+            "username": "guru_matematika",
+            "full_name": "Guru Matematika",
+            "password": "password123",
+            "teacher_code": "G-014",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["username"] == "guru_matematika"
+    assert payload["full_name"] == "Guru Matematika"
+    assert payload["nip"] == "G-014"
+    assert payload["is_active"] is True
+    assert len(client.get("/users").json()) == 1
+    assert len(client.get("/teachers").json()) == 1
+
+
+def test_create_teacher_account_rolls_back_when_username_or_code_is_duplicate(client):
+    request_data = {
+        "username": "guru_matematika",
+        "full_name": "Guru Matematika",
+        "password": "password123",
+        "teacher_code": "G-014",
+    }
+    first = client.post("/teachers/create-with-account", json=request_data)
+    second = client.post(
+        "/teachers/create-with-account",
+        json={
+            **request_data,
+            "username": "guru_fisika",
+            "teacher_code": "G-014",
+        },
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert len(client.get("/users").json()) == 1
+    assert len(client.get("/teachers").json()) == 1
+
+
 def test_assign_and_get_class_officer(client):
     user_response = create_user(client, "petugas1")
     class_response = create_classroom(client, "X TKJ 1")
@@ -895,6 +1003,61 @@ def setup_session_with_student(client):
         "actual_start_time": "08:35", "actual_end_time": "09:55",
     }).json()
     return session, teacher, student, slot_ids
+
+
+def test_teacher_can_record_attendance_by_class_number(client):
+    session, teacher, _student, slot_ids = setup_session_with_student(client)
+    roster = client.put(
+        "/classes/1/roster",
+        json={"roster_size": 3},
+    )
+    assert roster.status_code == 200
+    assert [item["attendance_number"] for item in roster.json()] == [1, 2, 3]
+
+    response = client.post(
+        f"/journal-sessions/{session['id']}/class-attendance",
+        json={
+            "slot_id": slot_ids[0],
+            "teacher_id": teacher["id"],
+            "records": [
+                {"attendance_number": 1, "attendance_status": "PRESENT"},
+                {"attendance_number": 2, "attendance_status": "SICK"},
+                {"attendance_number": 3, "attendance_status": "PERMITTED"},
+            ],
+        },
+    )
+    assert response.status_code == 201
+    assert [row["attendance_number"] for row in response.json()] == [1, 2, 3]
+    assert {row["attendance_status"] for row in response.json()} == {
+        "PRESENT", "SICK", "PERMITTED"
+    }
+
+    completeness = client.get(
+        f"/journal-sessions/{session['id']}/attendance/completeness?slot_id={slot_ids[0]}"
+    ).json()[0]
+    assert completeness["total_students"] == 3
+    assert completeness["recorded_count"] == 3
+    assert completeness["missing_count"] == 0
+
+
+def test_class_number_attendance_rejects_unregistered_number(client):
+    session, teacher, _student, slot_ids = setup_session_with_student(client)
+    client.put("/classes/1/roster", json={"roster_size": 2})
+    response = client.post(
+        f"/journal-sessions/{session['id']}/class-attendance",
+        json={
+            "slot_id": slot_ids[0],
+            "teacher_id": teacher["id"],
+            "records": [
+                {"attendance_number": 1, "attendance_status": "PRESENT"},
+                {"attendance_number": 3, "attendance_status": "ABSENT"},
+            ],
+        },
+    )
+    assert response.status_code == 400
+    assert client.get(
+        f"/journal-sessions/{session['id']}/class-attendance"
+    ).json() == []
 
 
 def test_teacher_can_record_attendance_per_student_and_jp(client):

@@ -175,11 +175,9 @@ def main(page: ft.Page):
             new_username = field("Username")
             new_name = field("Nama lengkap")
             new_role = ft.Dropdown(
-                label="Role", width=320, value="teacher",
+                label="Role", width=320, value="admin",
                 options=[
                     ft.DropdownOption(key="admin", text="Admin"),
-                    ft.DropdownOption(key="teacher", text="Guru"),
-                    ft.DropdownOption(key="class_officer", text="Petugas kelas"),
                 ],
             )
             new_user_password = field("Password awal", password=True)
@@ -201,10 +199,38 @@ def main(page: ft.Page):
                 except Exception as error:
                     notify(str(error), True)
 
-            section("Tambah akun", [
+            section("Tambah akun admin", [
                 new_username, new_name, new_role, new_user_password,
-                button("Buat akun", create_user, True),
-                ft.Text("Password awal langsung diatur setelah akun dibuat."),
+                button("Buat akun admin", create_user, True),
+            ])
+
+            teacher_username = field("Username guru")
+            teacher_full_name = field("Nama lengkap guru")
+            teacher_code = field("Kode guru")
+            teacher_password = field("Password awal guru", password=True)
+
+            def create_teacher_account(_):
+                try:
+                    if len(teacher_password.value) < 8:
+                        raise RuntimeError("Password guru minimal 8 karakter.")
+                    result = api.post("/teachers/create-with-account", {
+                        "username": teacher_username.value.strip(),
+                        "full_name": teacher_full_name.value.strip(),
+                        "password": teacher_password.value,
+                        "teacher_code": teacher_code.value.strip(),
+                    })
+                    notify(
+                        f"Akun guru {result['full_name']} dibuat. "
+                        f"Username: {result['username']}."
+                    )
+                    show_home(user)
+                except Exception as error:
+                    notify(str(error), True)
+
+            section("Buat akun guru dan kode guru", [
+                teacher_username, teacher_full_name, teacher_code, teacher_password,
+                button("Buat akun guru", create_teacher_account, True),
+                ft.Text("Akun dan kode guru disimpan dalam satu proses."),
             ])
 
             account_records = list(users)
@@ -318,314 +344,45 @@ def main(page: ft.Page):
 
             class_name = field("Nama kelas")
             academic_year = field("Tahun ajaran", "2026/2027")
+            officer_full_name = field("Nama lengkap petugas kelas")
+            officer_password = field("Password awal petugas (minimal 8 karakter)", password=True)
+            roster_size = field("Jumlah nomor absen siswa", "40")
 
             def create_class(_):
                 try:
-                    api.post("/classes", {
+                    if len(officer_password.value) < 8:
+                        raise RuntimeError("Password petugas minimal 8 karakter.")
+                    if not roster_size.value.isdigit() or not 1 <= int(roster_size.value) <= 60:
+                        raise RuntimeError("Jumlah nomor absen harus antara 1 sampai 60.")
+                    result = api.post("/classes/create-with-officer", {
                         "name": class_name.value.strip(),
                         "academic_year": academic_year.value.strip(),
+                        "officer_full_name": officer_full_name.value.strip(),
+                        "officer_password": officer_password.value,
+                        "roster_size": int(roster_size.value),
                     })
-                    notify("Kelas berhasil dibuat.")
+                    notify(
+                        f"Kelas {result['classroom']['name']} dan akun "
+                        f"{result['officer']['username']} berhasil dibuat."
+                    )
                     show_home(user)
                 except Exception as error:
                     notify(str(error), True)
 
-            section("Data kelas", [
-                ft.Text(f"Jumlah kelas: {len(classes)}"),
+            section("Kelas dan akun petugas kelas", [
+                ft.Text("Satu kali simpan akan membuat kelas, akun petugas, dan penugasannya sekaligus."),
+                ft.Text(f"Jumlah kelas saat ini: {len(classes)}"),
+                class_name, academic_year, officer_full_name, officer_password,
+                roster_size,
+                button("Buat kelas dan akun petugas", create_class, True),
+            ])
+
+            section("Daftar kelas", [
                 ft.Text("\n".join(
-                    f"ID {c['id']} • {c['name']} • {c['academic_year']}" for c in classes
+                    f"{c['name']} • Tahun ajaran {c['academic_year']}"
+                    for c in classes
                 ) or "Belum ada kelas."),
-                class_name, academic_year,
-                button("Tambah kelas", create_class, True),
             ])
-
-            class_options = [
-                ft.DropdownOption(key=str(c["id"]), text=c["name"])
-                for c in classes
-            ]
-            student_nis = field("NIS siswa")
-            student_full_name = field("Nama siswa")
-            student_class = ft.Dropdown(
-                label="Kelas siswa", width=320,
-                options=class_options,
-            )
-            student_filter_class = ft.Dropdown(
-                label="Tampilkan siswa kelas", width=320,
-                options=class_options,
-                value=str(classes[0]["id"]) if classes else None,
-            )
-            student_to_edit = ft.Dropdown(
-                label="Pilih siswa untuk diedit", width=520, options=[],
-            )
-            student_edit_nis = field("NIS", width=250)
-            student_edit_name = field("Nama lengkap", width=400)
-            student_edit_class = ft.Dropdown(
-                label="Pindahkan ke kelas", width=320,
-                options=class_options,
-            )
-            student_list = ft.Column(spacing=4)
-            loaded_students = []
-
-            def refresh_student_list(_=None):
-                loaded_students.clear()
-                student_list.controls.clear()
-                student_to_edit.options = []
-                student_to_edit.value = None
-                if not student_filter_class.value:
-                    student_list.controls.append(ft.Text("Buat kelas terlebih dahulu."))
-                    page.update()
-                    return
-                loaded_students.extend(api.get(
-                    "/students",
-                    {"class_id": int(student_filter_class.value)},
-                ))
-                student_to_edit.options = [
-                    ft.DropdownOption(
-                        key=str(item["id"]),
-                        text=(
-                            f"{item['full_name']} • NIS {item['nis']} "
-                            f"({'Aktif' if item['is_active'] else 'Nonaktif'})"
-                        ),
-                    )
-                    for item in loaded_students
-                ]
-                student_list.controls.extend([
-                    ft.Text(
-                        f"{item['full_name']} • NIS {item['nis']} • "
-                        f"{'Aktif' if item['is_active'] else 'Nonaktif'}"
-                    )
-                    for item in loaded_students
-                ] or [ft.Text("Belum ada siswa di kelas ini.")])
-                page.update()
-
-            def load_student_to_edit(_=None):
-                selected = next(
-                    (item for item in loaded_students
-                     if str(item["id"]) == student_to_edit.value),
-                    None,
-                )
-                if selected is None:
-                    return
-                student_edit_nis.value = selected["nis"]
-                student_edit_name.value = selected["full_name"]
-                student_edit_class.value = str(selected["class_id"])
-                page.update()
-
-            student_to_edit.on_change = load_student_to_edit
-            student_filter_class.on_change = refresh_student_list
-
-            def create_student(_):
-                try:
-                    result = api.post("/students", {
-                        "nis": student_nis.value.strip(),
-                        "full_name": student_full_name.value.strip(),
-                        "class_id": int(student_class.value),
-                    })
-                    notify(f"Siswa dibuat. ID siswa: {result['id']}")
-                    refresh_student_list()
-                except Exception as error:
-                    notify(str(error), True)
-
-            def update_student(_):
-                try:
-                    if not student_to_edit.value:
-                        raise RuntimeError("Pilih siswa yang akan diubah.")
-                    student_id = int(student_to_edit.value)
-                    api.put(f"/students/{student_id}", {
-                        "nis": student_edit_nis.value.strip(),
-                        "full_name": student_edit_name.value.strip(),
-                        "class_id": int(student_edit_class.value),
-                    })
-                    notify("Data siswa berhasil diperbarui.")
-                    refresh_student_list()
-                except Exception as error:
-                    notify(str(error), True)
-
-            def deactivate_student(_):
-                try:
-                    if not student_to_edit.value:
-                        raise RuntimeError("Pilih siswa yang akan dinonaktifkan.")
-                    student_id = int(student_to_edit.value)
-                    api.request("DELETE", f"/students/{student_id}")
-                    notify("Siswa dinonaktifkan. Riwayat absensinya tetap tersimpan.")
-                    refresh_student_list()
-                except Exception as error:
-                    notify(str(error), True)
-
-            section("Tambah siswa", [
-                student_nis, student_full_name, student_class,
-                button("Simpan siswa", create_student),
-            ])
-            section("Daftar dan pengelolaan siswa", [
-                student_filter_class,
-                button("Muat ulang daftar siswa", refresh_student_list),
-                student_list,
-                student_to_edit,
-                ft.Row([student_edit_nis, student_edit_name]),
-                student_edit_class,
-                ft.Row([
-                    button("Simpan perubahan", update_student, True),
-                    button("Nonaktifkan siswa", deactivate_student),
-                ]),
-            ])
-            refresh_student_list()
-
-            # Profil guru dihubungkan ke akun dengan role teacher.
-            teacher_records = []
-            teacher_account = ft.Dropdown(
-                label="Akun guru yang belum memiliki profil", width=420,
-                options=[],
-            )
-            teacher_nip = field("NIP guru (opsional)", width=320)
-            teacher_to_edit = ft.Dropdown(
-                label="Pilih profil guru", width=520, options=[],
-            )
-            teacher_edit_nip = field("Ubah NIP", width=320)
-            teacher_list = ft.Column(spacing=4)
-
-            def refresh_teacher_list(_=None):
-                teacher_records.clear()
-                teacher_records.extend(api.get("/teachers"))
-                linked_user_ids = {item["user_id"] for item in teacher_records}
-                available_accounts = [
-                    account for account in users
-                    if account["role"] == "teacher"
-                    and account.get("is_active", True)
-                    and account["id"] not in linked_user_ids
-                ]
-                teacher_account.options = [
-                    ft.DropdownOption(
-                        key=str(account["id"]),
-                        text=f"{account['full_name']} • {account['username']}",
-                    )
-                    for account in available_accounts
-                ]
-                teacher_account.value = None
-                teacher_to_edit.options = [
-                    ft.DropdownOption(
-                        key=str(item["id"]),
-                        text=f"{item['full_name']} • {item['username']} "
-                             f"({'Aktif' if item['is_active'] else 'Nonaktif'})",
-                    )
-                    for item in teacher_records
-                ]
-                teacher_to_edit.value = None
-                teacher_list.controls = [
-                    ft.Text(
-                        f"{item['full_name']} • Akun: {item['username']} • "
-                        f"NIP: {item['nip'] or '-'} • "
-                        f"{'Aktif' if item['is_active'] else 'Nonaktif'}"
-                    )
-                    for item in teacher_records
-                ] or [ft.Text("Belum ada profil guru.")]
-                page.update()
-
-            def load_teacher_to_edit(_=None):
-                selected = next(
-                    (item for item in teacher_records
-                     if str(item["id"]) == teacher_to_edit.value),
-                    None,
-                )
-                if selected is None:
-                    return
-                teacher_edit_nip.value = selected["nip"] or ""
-                page.update()
-
-            teacher_to_edit.on_change = load_teacher_to_edit
-
-            def create_teacher_profile(_):
-                try:
-                    if not teacher_account.value:
-                        raise RuntimeError("Pilih akun guru yang belum memiliki profil.")
-                    result = api.post("/teachers", {
-                        "user_id": int(teacher_account.value),
-                        "nip": teacher_nip.value.strip() or None,
-                    })
-                    notify(f"Profil guru {result['full_name']} berhasil dibuat.")
-                    refresh_teacher_list()
-                except Exception as error:
-                    notify(str(error), True)
-
-            def update_teacher_profile(_):
-                try:
-                    if not teacher_to_edit.value:
-                        raise RuntimeError("Pilih profil guru yang akan diubah.")
-                    teacher_id = int(teacher_to_edit.value)
-                    api.put(f"/teachers/{teacher_id}", {
-                        "nip": teacher_edit_nip.value.strip() or None,
-                    })
-                    notify("NIP guru berhasil diperbarui.")
-                    refresh_teacher_list()
-                except Exception as error:
-                    notify(str(error), True)
-
-            def deactivate_teacher_profile(_):
-                try:
-                    if not teacher_to_edit.value:
-                        raise RuntimeError("Pilih profil guru yang akan dinonaktifkan.")
-                    teacher_id = int(teacher_to_edit.value)
-                    api.request("DELETE", f"/teachers/{teacher_id}")
-                    notify("Profil guru dinonaktifkan. Riwayat terkait tetap tersimpan.")
-                    refresh_teacher_list()
-                except Exception as error:
-                    notify(str(error), True)
-
-            section("Tambah profil guru", [
-                ft.Text("Pilih akun ber-role Guru yang belum terhubung ke profil guru."),
-                teacher_account, teacher_nip,
-                button("Hubungkan akun dan buat profil", create_teacher_profile, True),
-            ])
-            section("Daftar dan pengelolaan guru", [
-                button("Muat ulang daftar guru", refresh_teacher_list),
-                teacher_list,
-                teacher_to_edit, teacher_edit_nip,
-                ft.Row([
-                    button("Simpan perubahan NIP", update_teacher_profile, True),
-                    button("Nonaktifkan profil", deactivate_teacher_profile),
-                ]),
-            ])
-            refresh_teacher_list()
-
-            officers = [u for u in users if u["role"] == "class_officer" and u.get("is_active", True)]
-            officer_class = ft.Dropdown(
-                label="Kelas untuk petugas", width=320,
-                options=[ft.DropdownOption(key=str(c["id"]), text=f"{c['name']} (ID {c['id']})") for c in classes],
-            )
-            officer_user = ft.Dropdown(
-                label="Petugas kelas", width=320,
-                options=[ft.DropdownOption(key=str(o["id"]), text=f"{o['full_name']} (ID {o['id']})") for o in officers],
-            )
-            officer_start = field("Mulai bertugas", str(date.today()))
-
-            def assign_officer(_):
-                try:
-                    class_id = int(officer_class.value)
-                    officer_id = int(officer_user.value)
-                    try:
-                        current = api.get(f"/classes/{class_id}/officer")
-                    except RuntimeError as error:
-                        if not str(error).startswith("404:"):
-                            raise
-                        current = None
-                    if current is None:
-                        api.put(f"/classes/{class_id}/officer/{officer_id}")
-                    elif current["user_id"] != officer_id:
-                        raise RuntimeError("Kelas sudah memiliki petugas jurnal utama yang berbeda.")
-                    api.post(f"/classes/{class_id}/officer-periods", {
-                        "user_id": officer_id,
-                        "start_date": officer_start.value.strip(),
-                        "end_date": None,
-                    })
-                    notify("Petugas jurnal kelas berhasil ditetapkan.")
-                except Exception as error:
-                    notify(str(error), True)
-
-            section("Penetapan petugas jurnal kelas", [
-                ft.Text("Pilih akun petugas dan tanggal mulai. Penetapan periode diperlukan agar petugas dapat membuat jurnal."),
-                officer_class, officer_user, officer_start,
-                button("Tetapkan petugas kelas", assign_officer, True),
-            ])
-
             subject_name = field("Nama mata pelajaran")
             subject_edit_choice = ft.Dropdown(
                 label="Pilih mata pelajaran untuk diubah", width=520, options=[],
@@ -1366,39 +1123,42 @@ def main(page: ft.Page):
                 selected_journal = next(
                     item for item in journals if item["id"] == int(journal_choice.value)
                 )
-                students = load_data(
-                    "/students", {"class_id": selected_journal["class_id"]}
+                roster = load_data(
+                    f"/classes/{selected_journal['class_id']}/roster"
                 )
                 existing_records = load_data(
-                    f"/journal-sessions/{selected['id']}/attendance"
+                    f"/journal-sessions/{selected['id']}/class-attendance"
                 )
-                recorded_ids = {
-                    item["student_id"] for item in existing_records
+                recorded_numbers = {
+                    item["attendance_number"] for item in existing_records
                     if item["slot_id"] == int(attendance_slot.value)
                 }
                 attendance_rows.clear()
                 attendance_form.controls.clear()
-                if recorded_ids:
+                if recorded_numbers:
                     attendance_form.controls.append(
-                        ft.Text(f"Absensi sudah tercatat untuk {len(recorded_ids)} siswa.")
+                        ft.Text(
+                            f"Sudah tercatat: {len(recorded_numbers)} dari {len(roster)} nomor absen."
+                        )
                     )
-                for student in students:
-                    if not student["is_active"] or student["id"] in recorded_ids:
+                for roster_item in roster:
+                    number = roster_item["attendance_number"]
+                    if not roster_item["is_active"] or number in recorded_numbers:
                         continue
                     status_choice = ft.Dropdown(
                         width=150, value="PRESENT",
                         options=attendance_status_options,
                     )
-                    attendance_rows.append((student["id"], status_choice))
+                    attendance_rows.append((number, status_choice))
                     attendance_form.controls.append(
                         ft.Row([
-                            ft.Text(student["full_name"], width=300),
+                            ft.Text(f"No. Absen {number}", width=300),
                             status_choice,
                         ])
                     )
                 if not attendance_rows:
                     attendance_form.controls.append(
-                        ft.Text("Semua siswa aktif sudah memiliki catatan absensi untuk sesi ini.")
+                        ft.Text("Semua nomor absen aktif sudah tercatat untuk JP ini.")
                     )
                 page.update()
 
@@ -1412,16 +1172,16 @@ def main(page: ft.Page):
                     if not attendance_rows:
                         raise RuntimeError("Tidak ada siswa baru yang perlu dicatat.")
                     api.post(
-                        f"/journal-sessions/{int(session_choice.value)}/attendance/batch",
+                        f"/journal-sessions/{int(session_choice.value)}/class-attendance",
                         {
                             "slot_id": int(attendance_slot.value),
                             "teacher_id": user["id"],
                             "records": [
                                 {
-                                    "student_id": student_id,
+                                    "attendance_number": attendance_number,
                                     "attendance_status": status_choice.value,
                                 }
-                                for student_id, status_choice in attendance_rows
+                                for attendance_number, status_choice in attendance_rows
                             ],
                         },
                     )

@@ -29,6 +29,19 @@ class ClassroomCreate(BaseModel):
     academic_year: str = Field(min_length=4, max_length=20)
 
 
+class ClassroomWithOfficerCreate(ClassroomCreate):
+    officer_full_name: str = Field(min_length=2, max_length=100)
+    officer_password: str = Field(min_length=8, max_length=128)
+    roster_size: int = Field(default=40, ge=1, le=60)
+
+
+class TeacherAccountCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    full_name: str = Field(min_length=2, max_length=100)
+    password: str = Field(min_length=8, max_length=128)
+    teacher_code: str = Field(min_length=2, max_length=30)
+
+
 class ClassroomResponse(BaseModel):
     id: int
     name: str
@@ -119,6 +132,50 @@ class ScheduleSubjectResponse(BaseModel):
     slot_id: int
     subject_id: int
     subject_name: str
+
+
+class ClassRosterSizeUpdate(BaseModel):
+    roster_size: int = Field(ge=1, le=60)
+
+
+class ClassRosterNumberResponse(BaseModel):
+    id: int
+    class_id: int
+    attendance_number: int
+    is_active: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ClassAttendanceBatchItem(BaseModel):
+    attendance_number: int = Field(ge=1, le=60)
+    attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "ABSENT"]
+
+
+class ClassAttendanceBatchCreate(BaseModel):
+    slot_id: int = Field(ge=1)
+    teacher_id: int = Field(ge=1)
+    records: list[ClassAttendanceBatchItem] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_numbers(self):
+        numbers = [item.attendance_number for item in self.records]
+        if len(numbers) != len(set(numbers)):
+            raise ValueError("Nomor absen tidak boleh duplikat dalam satu pengiriman.")
+        return self
+
+
+class ClassAttendanceRecordResponse(BaseModel):
+    id: int
+    session_id: int
+    slot_id: int
+    class_id: int
+    attendance_number: int
+    jp_number: int
+    teacher_id: int
+    teacher_name: str
+    attendance_status: Literal["PRESENT", "SICK", "PERMITTED", "ABSENT"]
+    recorded_at: datetime
 
 
 class StudentCreate(BaseModel):

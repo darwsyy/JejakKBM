@@ -1119,3 +1119,19 @@ Bagian ini memperbarui ketentuan lama yang masih menyebut proses penugasan dan k
 - GUI awal menyediakan login/bootstrap admin, pengelolaan akun dan kelas, pembuatan siswa, penetapan petugas kelas dan periodenya, pembuatan mata pelajaran serta slot jadwal, penugasan guru ke slot, jadwal guru piket, pembuatan dan pengiriman jurnal, laporan guru tidak hadir, inbox pemeriksaan guru piket, pembuatan sesi pembelajaran, input absensi per siswa, dan notifikasi.
 - Pengujian backend setelah migrasi GUI: 112 passed, 1 warning. Endpoint Flet Web mengembalikan HTTP 200; endpoint `/health` backend juga HTTP 200.
 - GUI masih perlu uji manual melalui browser, terutama rangkaian setup admin -> jurnal petugas kelas -> sesi dan absensi guru -> review guru piket. Beberapa input memakai ID hasil pembuatan data agar alur tetap sederhana. Jangan menganggap seluruh alur GUI sudah selesai hanya karena backend tests lulus.
+
+## Redesign Update — Class Roster Attendance (2026-11-23)
+
+- New class creation through `POST /classes/create-with-officer` now creates the class, one class-officer account, its assignment/period, and an anonymous class roster in one transaction.
+- `roster_size` is configurable from 1–60 and defaults to 40. The admin GUI asks for the number of attendance numbers when creating the class.
+- Username for the officer is generated from the class name using the `petugas_<class_slug>` convention.
+- New `ClassRosterNumber` records contain only `class_id`, `attendance_number`, and `is_active`. No student name or NIS is required for attendance.
+- New `ClassAttendanceRecord` records store attendance by session, JP, class, attendance number, teacher, and status. Legacy `Student` and `AttendanceRecord` tables remain for backward compatibility and historical records; do not drop them until a deliberate migration is designed.
+- New endpoints:
+  - `GET /classes/{class_id}/roster`
+  - `PUT /classes/{class_id}/roster` with `roster_size`
+  - `GET /journal-sessions/{session_id}/class-attendance`
+  - `POST /journal-sessions/{session_id}/class-attendance`
+- Attendance completeness and journal submission use the anonymous class roster when configured; otherwise they fall back to legacy student records.
+- Teacher GUI attendance input now displays attendance numbers instead of student names and submits to the new class-attendance endpoint.
+- Existing DB startup uses SQLAlchemy `create_all`, which creates the new tables without dropping old tables. Existing classes without a roster get a default 40-number roster when the roster endpoint is first requested.

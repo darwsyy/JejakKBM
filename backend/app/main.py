@@ -1,4 +1,5 @@
 import csv
+import re
 from datetime import date
 from io import StringIO
 
@@ -12,7 +13,7 @@ from app.auth import (
     hash_password, require_roles, verify_password,
 )
 from app.models import (
-    AttendanceRecord, AuditLog, ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, DutyRoster, JournalReview, JournalSession, JournalSessionSlot, Notification, ScheduleSlot, ScheduleTeacherAssignment, TeacherAbsenceReport,
+    AttendanceRecord, ClassAttendanceRecord, ClassRosterNumber, AuditLog, ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, DutyRoster, JournalReview, JournalSession, JournalSessionSlot, Notification, ScheduleSlot, ScheduleTeacherAssignment, TeacherAbsenceReport,
     ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
@@ -40,9 +41,15 @@ from app.schemas import (
     AttendanceResponse,
     AttendanceBatchCreate,
     AttendanceCompletenessResponse,
+    ClassRosterSizeUpdate,
+    ClassRosterNumberResponse,
+    ClassAttendanceBatchCreate,
+    ClassAttendanceRecordResponse,
     ClassOfficerPeriodCreate,
     ClassOfficerPeriodResponse,
     ClassroomCreate,
+    ClassroomWithOfficerCreate,
+    TeacherAccountCreate,
     ClassroomResponse,
     UserCreate,
     UserUpdate,
@@ -297,6 +304,23 @@ def deactivate_user(
     return user
 
 
+def ensure_class_roster(db: Session, class_id: int, roster_size: int = 40):
+    existing = {
+        row.attendance_number: row
+        for row in db.query(ClassRosterNumber).filter(
+            ClassRosterNumber.class_id == class_id
+        ).all()
+    }
+    for number in range(1, roster_size + 1):
+        if number not in existing:
+            db.add(ClassRosterNumber(class_id=class_id, attendance_number=number))
+        else:
+            existing[number].is_active = True
+    for number, row in existing.items():
+        if number > roster_size:
+            row.is_active = False
+
+
 @app.post(
     "/classes",
     response_model=ClassroomResponse,
@@ -323,9 +347,122 @@ def create_classroom(data: ClassroomCreate, db: Session = Depends(get_db)):
     return classroom
 
 
+@app.post(
+    "/classes/create-with-officer",
+    status_code=status.HTTP_201_CREATED,
+    tags=["Classes"],
+    dependencies=[Depends(require_roles("admin"))],
+)
+def create_classroom_with_officer(
+    data: ClassroomWithOfficerCreate,
+    db: Session = Depends(get_db),
+):
+    """Membuat kelas dan satu akun petugasnya dalam satu transaksi."""
+    slug = re.sub(r"[^a-z0-9]+", "_", data.name.lower()).strip("_")
+    if not slug:
+        raise HTTPException(status_code=422, detail="Nama kelas tidak menghasilkan username yang valid.")
+    officer_username = f"petugas_{slug}"[:50]
+
+    if db.query(User.id).filter(User.username == officer_username).first():
+        raise HTTPException(
+            status_code=409,
+            detail=f"Username otomatis {officer_username} sudah digunakan. Periksa nama kelas.",
+        )
+
+    classroom = Classroom(
+        name=data.name.strip(),
+        academic_year=data.academic_year.strip(),
+    )
+    db.add(classroom)
+    try:
+        db.flush()
+        officer = User(
+            username=officer_username,
+            full_name=data.officer_full_name.strip(),
+            role="class_officer",
+            password_hash=hash_password(data.officer_password),
+        )
+        db.add(officer)
+        db.flush()
+        db.add(ClassOfficerAssignment(class_id=classroom.id, user_id=officer.id))
+        db.add(ClassOfficerPeriod(
+            class_id=classroom.id,
+            user_id=officer.id,
+            start_date=date.today(),
+            end_date=None,
+        ))
+        ensure_class_roster(db, classroom.id, data.roster_size)
+        db.commit()
+        db.refresh(classroom)
+        db.refresh(officer)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Kelas atau username petugas sudah digunakan. Tidak ada data yang disimpan.",
+        )
+
+    return {
+        "classroom": classroom,
+        "officer": {
+            "id": officer.id,
+            "username": officer.username,
+            "full_name": officer.full_name,
+            "role": officer.role,
+        },
+        "message": "Kelas dan akun petugas berhasil dibuat.",
+    }
+
+
 @app.get("/classes", response_model=list[ClassroomResponse], tags=["Classes"], dependencies=[Depends(get_current_user)])
 def get_classrooms(db: Session = Depends(get_db)):
     return db.query(Classroom).order_by(Classroom.id).all()
+
+
+@app.get(
+    "/classes/{class_id}/roster",
+    response_model=list[ClassRosterNumberResponse],
+    tags=["Class Roster"],
+    dependencies=[Depends(get_current_user)],
+)
+def get_class_roster(class_id: int, db: Session = Depends(get_db)):
+    classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
+    if classroom is None:
+        raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+    rows = db.query(ClassRosterNumber).filter(
+        ClassRosterNumber.class_id == class_id,
+        ClassRosterNumber.is_active.is_(True),
+    ).order_by(ClassRosterNumber.attendance_number).all()
+    if not rows:
+        ensure_class_roster(db, class_id, 40)
+        db.commit()
+        rows = db.query(ClassRosterNumber).filter(
+            ClassRosterNumber.class_id == class_id,
+            ClassRosterNumber.is_active.is_(True),
+        ).order_by(ClassRosterNumber.attendance_number).all()
+    return rows
+
+
+@app.put(
+    "/classes/{class_id}/roster",
+    response_model=list[ClassRosterNumberResponse],
+    tags=["Class Roster"],
+    dependencies=[Depends(require_roles("admin"))],
+)
+def update_class_roster(
+    class_id: int,
+    data: ClassRosterSizeUpdate,
+    db: Session = Depends(get_db),
+):
+    classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
+    if classroom is None:
+        raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+    ensure_class_roster(db, class_id, data.roster_size)
+    db.commit()
+    return db.query(ClassRosterNumber).filter(
+        ClassRosterNumber.class_id == class_id,
+        ClassRosterNumber.is_active.is_(True),
+    ).order_by(ClassRosterNumber.attendance_number).all()
 
 
 @app.put(
@@ -940,6 +1077,50 @@ def deactivate_student(student_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(student)
     return student
+
+
+@app.post(
+    "/teachers/create-with-account",
+    response_model=TeacherResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Teachers"],
+    dependencies=[Depends(require_roles("admin"))],
+)
+def create_teacher_with_account(
+    data: TeacherAccountCreate,
+    db: Session = Depends(get_db),
+):
+    """Membuat akun guru dan data kode gurunya secara bersamaan."""
+    user = User(
+        username=data.username.strip(),
+        full_name=data.full_name.strip(),
+        role="teacher",
+        password_hash=hash_password(data.password),
+    )
+    db.add(user)
+    try:
+        db.flush()
+        teacher_code = data.teacher_code.strip()
+        teacher = Teacher(user_id=user.id, nip=teacher_code)
+        db.add(teacher)
+        db.commit()
+        db.refresh(user)
+        db.refresh(teacher)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Username atau kode guru sudah digunakan. Tidak ada akun yang dibuat.",
+        )
+
+    return TeacherResponse(
+        id=teacher.id,
+        user_id=user.id,
+        username=user.username,
+        full_name=user.full_name,
+        nip=teacher.nip,
+        is_active=teacher.is_active,
+    )
 
 
 @app.post(
@@ -1662,6 +1843,129 @@ def create_attendance_batch(
     return [build_attendance_response(db, record) for record in records]
 
 
+def build_class_attendance_response(
+    db: Session, record: ClassAttendanceRecord
+):
+    teacher = db.query(User).filter(User.id == record.teacher_id).first()
+    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == record.slot_id).first()
+    return ClassAttendanceRecordResponse(
+        id=record.id,
+        session_id=record.session_id,
+        slot_id=record.slot_id,
+        class_id=record.class_id,
+        attendance_number=record.attendance_number,
+        jp_number=slot.jp_number,
+        teacher_id=teacher.id,
+        teacher_name=teacher.full_name,
+        attendance_status=record.attendance_status,
+        recorded_at=record.recorded_at,
+    )
+
+
+@app.get(
+    "/journal-sessions/{session_id}/class-attendance",
+    response_model=list[ClassAttendanceRecordResponse],
+    tags=["Attendance"],
+    dependencies=[Depends(get_current_user)],
+)
+def get_class_attendance(session_id: int, db: Session = Depends(get_db)):
+    session = db.query(JournalSession).filter(JournalSession.id == session_id).first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Sesi pembelajaran tidak ditemukan.")
+    records = db.query(ClassAttendanceRecord).filter(
+        ClassAttendanceRecord.session_id == session_id
+    ).order_by(
+        ClassAttendanceRecord.slot_id,
+        ClassAttendanceRecord.attendance_number,
+    ).all()
+    return [build_class_attendance_response(db, row) for row in records]
+
+
+@app.post(
+    "/journal-sessions/{session_id}/class-attendance",
+    response_model=list[ClassAttendanceRecordResponse],
+    status_code=status.HTTP_201_CREATED,
+    tags=["Attendance"],
+    dependencies=[Depends(get_current_user)],
+)
+def create_class_attendance_batch(
+    session_id: int,
+    data: ClassAttendanceBatchCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.id != data.teacher_id:
+        raise HTTPException(status_code=403, detail="Token login harus milik guru pengajar sesi ini.")
+    session = db.query(JournalSession).filter(JournalSession.id == session_id).first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Sesi pembelajaran tidak ditemukan.")
+    journal = db.query(DailyJournal).filter(DailyJournal.id == session.journal_id).first()
+    if journal.status != "DRAFT":
+        raise HTTPException(status_code=400, detail="Absensi hanya dapat diisi saat jurnal berstatus DRAFT.")
+    if session.teacher_id != data.teacher_id:
+        raise HTTPException(status_code=403, detail="Hanya guru pengajar sesi ini yang boleh mengisi absensi.")
+    teacher = db.query(User).filter(
+        User.id == data.teacher_id,
+        User.role == "teacher",
+        User.is_active.is_(True),
+    ).first()
+    if teacher is None:
+        raise HTTPException(status_code=403, detail="Akun pengisi harus guru yang aktif.")
+    session_slot = db.query(JournalSessionSlot).filter(
+        JournalSessionSlot.session_id == session_id,
+        JournalSessionSlot.slot_id == data.slot_id,
+    ).first()
+    if session_slot is None:
+        raise HTTPException(status_code=400, detail="JP tersebut tidak termasuk dalam sesi ini.")
+
+    active_numbers = {
+        row.attendance_number for row in db.query(ClassRosterNumber).filter(
+            ClassRosterNumber.class_id == journal.class_id,
+            ClassRosterNumber.is_active.is_(True),
+        ).all()
+    }
+    submitted_numbers = {item.attendance_number for item in data.records}
+    if not active_numbers:
+        raise HTTPException(status_code=400, detail="Daftar nomor absen kelas belum dikonfigurasi.")
+    invalid_numbers = submitted_numbers - active_numbers
+    if invalid_numbers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Nomor absen tidak terdaftar di kelas: {', '.join(map(str, sorted(invalid_numbers)))}.",
+        )
+
+    existing_numbers = {
+        row.attendance_number for row in db.query(ClassAttendanceRecord).filter(
+            ClassAttendanceRecord.session_id == session_id,
+            ClassAttendanceRecord.slot_id == data.slot_id,
+            ClassAttendanceRecord.attendance_number.in_(submitted_numbers),
+        ).all()
+    }
+    if existing_numbers:
+        raise HTTPException(status_code=409, detail="Sebagian nomor absen sudah dicatat untuk JP ini.")
+
+    records = [
+        ClassAttendanceRecord(
+            session_id=session_id,
+            slot_id=data.slot_id,
+            class_id=journal.class_id,
+            attendance_number=item.attendance_number,
+            teacher_id=data.teacher_id,
+            attendance_status=item.attendance_status,
+        )
+        for item in data.records
+    ]
+    db.add_all(records)
+    add_audit_log(
+        db, current_user.id, "CLASS_ATTENDANCE_RECORDED", "DailyJournal",
+        journal.id, f"Absensi nomor absen {len(records)} siswa dicatat.",
+    )
+    db.commit()
+    for row in records:
+        db.refresh(row)
+    return [build_class_attendance_response(db, row) for row in records]
+
+
 @app.get(
     "/journal-sessions/{session_id}/attendance/completeness",
     response_model=list[AttendanceCompletenessResponse],
@@ -1685,24 +1989,47 @@ def get_attendance_completeness(
     if slot_id is not None:
         slot_ids = [slot_id]
 
-    students = db.query(Student).filter(
-        Student.class_id == journal.class_id, Student.is_active.is_(True)
-    ).order_by(Student.full_name).all()
+    roster_numbers = [
+        row.attendance_number for row in db.query(ClassRosterNumber).filter(
+            ClassRosterNumber.class_id == journal.class_id,
+            ClassRosterNumber.is_active.is_(True),
+        ).order_by(ClassRosterNumber.attendance_number).all()
+    ]
+    legacy_students = []
+    if not roster_numbers:
+        legacy_students = db.query(Student).filter(
+            Student.class_id == journal.class_id, Student.is_active.is_(True)
+        ).order_by(Student.id).all()
     results = []
     for current_slot_id in slot_ids:
         slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == current_slot_id).first()
-        attendance = db.query(AttendanceRecord).filter(
-            AttendanceRecord.session_id == session_id,
-            AttendanceRecord.slot_id == current_slot_id,
-        ).all()
-        recorded_ids = {record.student_id for record in attendance}
-        missing = [
-            {"student_id": student.id, "nis": student.nis, "full_name": student.full_name}
-            for student in students if student.id not in recorded_ids
-        ]
+        if roster_numbers:
+            attendance = db.query(ClassAttendanceRecord).filter(
+                ClassAttendanceRecord.session_id == session_id,
+                ClassAttendanceRecord.slot_id == current_slot_id,
+            ).all()
+            recorded_numbers = {record.attendance_number for record in attendance}
+            missing = [
+                {"attendance_number": number}
+                for number in roster_numbers if number not in recorded_numbers
+            ]
+            recorded_count = len(recorded_numbers)
+            total_count = len(roster_numbers)
+        else:
+            attendance = db.query(AttendanceRecord).filter(
+                AttendanceRecord.session_id == session_id,
+                AttendanceRecord.slot_id == current_slot_id,
+            ).all()
+            recorded_ids = {record.student_id for record in attendance}
+            missing = [
+                {"student_id": student.id, "nis": student.nis, "full_name": student.full_name}
+                for student in legacy_students if student.id not in recorded_ids
+            ]
+            recorded_count = len(recorded_ids)
+            total_count = len(legacy_students)
         results.append(AttendanceCompletenessResponse(
             session_id=session_id, slot_id=current_slot_id, jp_number=slot.jp_number,
-            total_students=len(students), recorded_count=len(recorded_ids),
+            total_students=total_count, recorded_count=recorded_count,
             missing_count=len(missing), missing_students=missing,
         ))
     return results
@@ -1835,31 +2162,48 @@ def submit_daily_journal(
             detail=f"Masih ada {len(missing_sessions)} JP pelajaran yang belum dicatat dalam sesi.",
         )
 
-    active_students = db.query(Student).filter(
-        Student.class_id == journal.class_id,
-        Student.is_active.is_(True),
-    ).all()
+    active_roster_numbers = {
+        row.attendance_number for row in db.query(ClassRosterNumber).filter(
+            ClassRosterNumber.class_id == journal.class_id,
+            ClassRosterNumber.is_active.is_(True),
+        ).all()
+    }
+    active_students = []
+    if not active_roster_numbers:
+        active_students = db.query(Student).filter(
+            Student.class_id == journal.class_id,
+            Student.is_active.is_(True),
+        ).all()
     for session in sessions:
         links = db.query(JournalSessionSlot).filter(
             JournalSessionSlot.session_id == session.id
         ).all()
         for link in links:
-            attendance_ids = {
-                row.student_id for row in db.query(AttendanceRecord).filter(
-                    AttendanceRecord.session_id == session.id,
-                    AttendanceRecord.slot_id == link.slot_id,
-                ).all()
-            }
-            missing_count = sum(
-                1 for student in active_students if student.id not in attendance_ids
-            )
+            if active_roster_numbers:
+                attendance_numbers = {
+                    row.attendance_number for row in db.query(ClassAttendanceRecord).filter(
+                        ClassAttendanceRecord.session_id == session.id,
+                        ClassAttendanceRecord.slot_id == link.slot_id,
+                    ).all()
+                }
+                missing_count = len(active_roster_numbers - attendance_numbers)
+            else:
+                attendance_ids = {
+                    row.student_id for row in db.query(AttendanceRecord).filter(
+                        AttendanceRecord.session_id == session.id,
+                        AttendanceRecord.slot_id == link.slot_id,
+                    ).all()
+                }
+                missing_count = sum(
+                    1 for student in active_students if student.id not in attendance_ids
+                )
             if missing_count:
                 slot = db.query(ScheduleSlot).filter(
                     ScheduleSlot.id == link.slot_id
                 ).first()
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Absensi JP {slot.jp_number} belum lengkap: {missing_count} siswa belum dicatat.",
+                    detail=f"Absensi JP {slot.jp_number} belum lengkap: {missing_count} nomor absen belum dicatat.",
                 )
 
     previous_revision = db.query(JournalReview).filter(
