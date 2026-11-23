@@ -9,7 +9,7 @@ import secrets
 import time
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -90,13 +90,16 @@ def read_access_token(token: str) -> tuple[int, int]:
         )
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# Login JejakKBM menggunakan JSON, sedangkan akses endpoint memakai Bearer token.
+# HTTPBearer membuat Swagger menampilkan kolom token biasa, bukan form OAuth2 password.
+bearer_scheme = HTTPBearer()
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
 ) -> User:
-    user_id, token_version = read_access_token(token)
+    user_id, token_version = read_access_token(credentials.credentials)
     user = db.query(User).filter(User.id == user_id).first()
     if user is None or not user.is_active or user.token_version != token_version:
         raise HTTPException(

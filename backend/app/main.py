@@ -1,8 +1,10 @@
 import csv
 from datetime import date
 from io import StringIO
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -76,6 +78,20 @@ app = FastAPI(
     description="Backend API untuk sistem jurnal kegiatan belajar mengajar.",
     version="0.1.0",
 )
+
+GUI_FILE = Path(__file__).resolve().parents[2] / "frontend" / "index.html"
+
+
+@app.get("/", include_in_schema=False)
+def gui_home():
+    return RedirectResponse(url="/app")
+
+
+@app.get("/app", include_in_schema=False)
+def gui_index():
+    if not GUI_FILE.is_file():
+        raise HTTPException(status_code=404, detail="File GUI tidak ditemukan.")
+    return FileResponse(GUI_FILE, media_type="text/html")
 
 
 @app.get("/health", tags=["Health"])

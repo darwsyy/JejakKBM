@@ -258,3 +258,16 @@ $env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
 - Siswa dan profil guru dinonaktifkan, bukan dihapus permanen, sehingga catatan historis tetap dapat ditelusuri.
 - Jurnal yang sudah dikirim atau diperiksa tidak dapat diubah melalui endpoint sesi dan absensi. Perbaikan hanya dilakukan setelah jurnal berstatus `REVISION_REQUIRED` dan petugas memulai revisi.
 - SQLite sekarang mengaktifkan pemeriksaan foreign key pada koneksi aplikasi. Relasi yang masih dipakai tidak bisa dihapus diam-diam; data harus tetap konsisten.
+
+
+## GUI Partial 1
+
+GUI awal dibuat dengan HTML, CSS, dan JavaScript sederhana tanpa framework tambahan. Halaman ini responsif untuk laptop dan browser HP.
+
+1. Jalankan backend menggunakan perintah Uvicorn seperti biasa.
+2. Buka `http://127.0.0.1:8000/` atau `http://127.0.0.1:8000/app`.
+3. Login menggunakan username dan password akun yang sudah dibuat melalui API.
+4. Halaman mengambil identitas akun dari `GET /auth/me` dan menampilkan menu sesuai role.
+5. Tombol Keluar memanggil `POST /auth/logout` lalu menghapus token dari sesi browser.
+
+File GUI berada di `frontend/index.html`. Tahap ini baru mencakup login dan kerangka dashboard; menu operasional akan dihubungkan pada partial berikutnya. Token disimpan di `sessionStorage`, sehingga tidak dipertahankan setelah sesi tab browser berakhir.
