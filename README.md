@@ -146,7 +146,7 @@ $env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
 - Secret default di kode hanya untuk pengembangan lokal. Untuk penggunaan sekolah, selalu atur `JEJAKKBM_SECRET_KEY` sendiri dan jangan membagikannya.
 - Password disimpan menggunakan PBKDF2-HMAC-SHA256. Token berlaku 8 jam; logout dan penggantian password membatalkan token lama.
 - `POST /auth/bootstrap` hanya dapat berhasil sebelum admin ber-password pertama dibuat.
-- Audit log mencatat pembuatan jurnal, sesi, absensi, pengiriman, review, revisi, laporan guru tidak hadir, dan penugasan piket. Hanya admin yang dapat membaca audit log.
+- Audit log mencatat pembuatan jurnal, sesi, absensi, pengiriman, review, revisi, penugasan piket. Hanya admin yang dapat membaca audit log.
 - Data demo dapat dibuat dengan `python backend/seed_demo.py`; gunakan hanya pada database latihan.
 - File database lokal tidak dimasukkan ke Git.
 - Jangan gunakan data pribadi siswa sungguhan untuk pengujian.
@@ -159,7 +159,7 @@ $env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
 - Profil guru terhubung ke satu akun dengan role teacher. NIP bersifat opsional dan unik jika diisi.
 - Riwayat petugas jurnal disimpan per periode tanggal. Periode untuk kelas yang sama tidak boleh bertumpang tindih; `end_date` boleh kosong untuk penugasan yang masih berjalan.
 - Satu kelas hanya memiliki satu jurnal per tanggal. Pembuatan jurnal memeriksa periode petugas dan aman diulang tanpa membuat jurnal duplikat. Jurnal baru berstatus `DRAFT`.
-- Sesi pembelajaran hanya memakai slot `LESSON` yang berurutan pada hari jurnal dan memiliki mata pelajaran yang sama. Biasanya guru sesi harus sama dengan guru terjadwal. Jika guru terjadwal tidak hadir, guru aktif lain boleh mengisi sesi setelah petugas kelas membuat laporan ketidakhadiran untuk setiap JP yang diambil alih. Data sesi dan absensi mencatat akun guru yang benar-benar mengajar. Waktu aktual serta materi dicatat pada sesi.
+- Sesi pembelajaran hanya memakai slot `LESSON` yang berurutan pada hari jurnal, memiliki mata pelajaran yang sama, dan diajar oleh guru yang ditetapkan pada jadwal. Waktu aktual serta materi dicatat pada sesi.
 - Absensi disimpan per siswa dan per JP. Hanya guru pengajar sesi yang dapat mengisi; siswa harus berasal dari kelas jurnal. Status sementara: `PRESENT`, `SICK`, `PERMITTED`, `ABSENT`.
 
 
@@ -218,16 +218,6 @@ $env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
 - Jika jurnal belum ada, endpoint tetap mengembalikan ringkasan kosong agar dashboard dapat menampilkan kelas yang belum mengirim jurnal.
 
 
-### Laporan guru tidak hadir
-
-- `POST /journals/{journal_id}/absence-reports` mencatat guru terjadwal yang tidak hadir pada satu JP. Request berisi `slot_id`, `officer_user_id`, dan catatan opsional.
-- Hanya petugas kelas yang ditetapkan dan masih aktif pada tanggal jurnal yang dapat melapor.
-- Laporan hanya berlaku untuk slot `LESSON` yang memiliki guru terjadwal dan belum memiliki sesi pembelajaran.
-- Satu JP hanya dapat memiliki satu laporan ketidakhadiran pada jurnal yang sama.
-- `GET /journals/{journal_id}/absence-reports` menampilkan semua laporan untuk jurnal tersebut.
-- Identitas pelapor diambil dari Bearer token; ID petugas pada request harus cocok dengan akun yang sedang login.
-
-
 ### Notifikasi dalam aplikasi
 
 - Saat jurnal dikirim, semua guru yang terdaftar sebagai guru piket pada tanggal jurnal menerima notifikasi.
@@ -256,7 +246,7 @@ $env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
 
 ### Perlindungan riwayat jurnal
 
-- Slot jadwal yang sudah digunakan oleh sesi jurnal atau laporan ketidakhadiran tidak dapat dihapus. Backend mengembalikan HTTP 409 agar data absensi dan riwayat jurnal lama tetap utuh.
+- Slot jadwal yang sudah digunakan oleh sesi jurnal tidak dapat dihapus. Backend mengembalikan HTTP 409 agar data absensi dan riwayat jurnal tetap utuh.
 - Siswa dan profil guru dinonaktifkan, bukan dihapus permanen, sehingga catatan historis tetap dapat ditelusuri.
 - Jurnal yang sudah dikirim atau diperiksa tidak dapat diubah melalui endpoint sesi dan absensi. Perbaikan hanya dilakukan setelah jurnal berstatus `REVISION_REQUIRED` dan petugas memulai revisi.
 - SQLite sekarang mengaktifkan pemeriksaan foreign key pada koneksi aplikasi. Relasi yang masih dipakai tidak bisa dihapus diam-diam; data harus tetap konsisten.

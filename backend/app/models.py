@@ -245,21 +245,6 @@ class DutyRoster(Base):
     assigned_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
 
-class TeacherAbsenceReport(Base):
-    __tablename__ = "teacher_absence_reports"
-    __table_args__ = (
-        UniqueConstraint("journal_id", "slot_id", name="unique_absence_report_per_slot"),
-    )
-
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    journal_id: Mapped[int] = mapped_column(ForeignKey("daily_journals.id"), nullable=False)
-    slot_id: Mapped[int] = mapped_column(ForeignKey("schedule_slots.id"), nullable=False)
-    scheduled_teacher_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    reported_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    reported_at: Mapped[object] = mapped_column(DateTime, server_default=func.now(), nullable=False)
-
-
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 

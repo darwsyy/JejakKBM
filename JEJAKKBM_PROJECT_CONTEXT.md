@@ -171,8 +171,6 @@ sebagai guru piket.
 ## 3.2 Petugas kelas (siswa yang ditunjuk)
 
 -   Melihat jadwal dan jurnal kelas hari ini.
--   Melaporkan guru tidak hadir.
--   Mencatat informasi guru pengganti untuk dikonfirmasi.
 -   Melengkapi bagian jurnal yang menjadi tanggung jawabnya.
 -   Memeriksa kelengkapan dan mengirim jurnal harian.
 -   Menerima notifikasi revisi dan mengajukan perbaikan.
@@ -189,7 +187,6 @@ absen masih perlu disahkan.
 -   Mengisi kehadiran siswa.
 -   Mencatat waktu aktual mulai dan selesai KBM.
 -   Mengonfirmasi pertanggungjawaban atas data.
--   Mengonfirmasi sesi jika menjadi guru pengganti.
 
 **Aturan:** hanya guru pengajar yang berwenang mengisi kehadiran siswa.
 Guru hanya dapat mengubah sesi yang menjadi kewenangannya, kecuali ada
@@ -345,29 +342,19 @@ pembelajaran berkelanjutan.
 
 Validasi: - JP berurutan; - kelas dan tanggal sama; - tidak melewati
 istirahat atau kegiatan khusus; - tidak bertabrakan dengan sesi lain; -
-guru sesuai jadwal atau penugasan pengganti; - sesi menyimpan daftar JP
+guru yang ditetapkan pada jadwal; - sesi menyimpan daftar JP
 yang dicakup.
 
 Contoh: JP 2 dan JP 3 dapat menjadi satu sesi. JP 4 yang berbeda mata
 pelajaran menjadi sesi lain.
 
-## 6.4 Guru tidak hadir
+## 6.4 Ketidakhadiran guru
 
-1.  Petugas kelas memilih slot bermasalah.
-2.  Sistem menampilkan guru dari jadwal.
-3.  Petugas melaporkan ketidakhadiran.
-4.  Jika ada guru pengganti, identitasnya dicatat.
-5.  Guru pengganti mengonfirmasi jika memungkinkan.
-6.  Laporan yang belum dikonfirmasi tetap terlihat bagi guru piket.
-7.  Guru piket memeriksa laporan sebagai bagian jurnal.
-
-Petugas tidak boleh mengisi materi/kehadiran seolah-olah sebagai guru.
+Aplikasi tidak menyediakan fitur pelaporan ketidakhadiran atau pengelolaan guru pengganti. Sesi pembelajaran hanya dicatat oleh guru yang ditetapkan pada jadwal. Petugas kelas tidak mengisi materi atau absensi atas nama guru.
 
 ## 6.5 Jam kosong
 
-Slot bertipe `FREE` tidak memerlukan sesi. Jika pelajaran menjadi kosong
-karena guru tidak hadir, catat kejadian ketidakhadiran; jangan diam-diam
-menyamakannya dengan jam kosong terjadwal.
+Slot bertipe `FREE` tidak memerlukan sesi. Aplikasi tidak menyediakan pencatatan khusus untuk ketidakhadiran guru.
 
 ## 6.6 Pengiriman jurnal
 
@@ -383,7 +370,7 @@ menyamakannya dengan jam kosong terjadwal.
 ## 6.7 Verifikasi guru piket
 
 Guru piket melihat kelas/tanggal, petugas, sesi/JP, guru, materi,
-kehadiran, waktu aktual, laporan guru tidak hadir/pengganti, data belum
+kehadiran, waktu aktual, data belum
 terkonfirmasi, dan riwayat revisi.
 
 Tindakan: - `APPROVE`: menyetujui. - `REQUEST_REVISION`: meminta
@@ -476,8 +463,6 @@ index, dan migration sebelum implementasi final.
   `learning_sessions`         Sesi pembelajaran, dapat mencakup beberapa JP
   `session_periods`           JP yang dicakup sesi
   `attendance_records`        Kehadiran siswa per sesi
-  `teacher_absence_reports`   Laporan guru tidak hadir
-  `substitute_assignments`    Guru pengganti dan konfirmasi
   `journal_reviews`           Pemeriksaan guru piket
   `journal_revisions`         Riwayat revisi
   `notifications`             Notifikasi
@@ -654,11 +639,6 @@ Endpoint berikut konseptual; kontrak final dibuat di
 Backend wajib memverifikasi guru pengisi sebagai guru pengajar yang
 berwenang.
 
-**Absence/substitute** -
-`POST /api/v1/journals/{journal_id}/absence-reports` -
-`POST /api/v1/absence-reports/{report_id}/substitute` -
-`POST /api/v1/substitutes/{assignment_id}/confirm`
-
 **Review** - `GET /api/v1/reviews/inbox` -
 `POST /api/v1/journals/{journal_id}/review` -
 `POST /api/v1/journals/{journal_id}/revisions` -
@@ -728,7 +708,6 @@ acceptance criteria terpenuhi.
 -   [ ] P0-06 Tetapkan kode kehadiran resmi (H/I/S/D) dan definisinya.
 -   [ ] P0-07 Tetapkan siapa yang boleh mengoreksi kehadiran.
 -   [ ] P0-08 Tetapkan batas waktu submit/verifikasi jika ada.
--   [ ] P0-09 Putuskan apakah laporan guru pengganti belum terkonfirmasi
     menghalangi submit.
 -   [ ] P0-10 Definisikan waktu aktual secara resmi.
 -   [ ] P0-11 Finalisasi SRS dan business rules.
@@ -834,21 +813,6 @@ snapshot historis tetap.
 **Acceptance:** petugas kelas tidak dapat mengubah kehadiran melalui
 API; setiap catatan punya pengisi; koreksi tidak menghapus riwayat.
 
-## Phase 7 --- Teacher Absence & Substitute
-
--   [ ] P7-01 Model laporan guru tidak hadir.
--   [ ] P7-02 Endpoint laporan petugas kelas.
--   [ ] P7-03 Ambil guru terjadwal dari snapshot.
--   [ ] P7-04 Model guru pengganti.
--   [ ] P7-05 Konfirmasi guru pengganti.
--   [ ] P7-06 Status belum terkonfirmasi.
--   [ ] P7-07 Integrasi laporan ke jurnal.
--   [ ] P7-08 Test tanpa pengganti/dengan pengganti.
-
-**Acceptance:** petugas hanya melaporkan; guru pengganti dapat
-mengonfirmasi; laporan belum terkonfirmasi terlihat oleh piket;
-ketidakhadiran tidak disamakan dengan jam kosong terjadwal.
-
 ## Phase 8 --- Submission, Review & Revision
 
 -   [ ] P8-01 Aturan kelengkapan jurnal.
@@ -892,7 +856,6 @@ notifikasi tidak membatalkan submit; tindakan penting dapat ditelusuri.
 -   [ ] P10-05 Jurnal harian.
 -   [ ] P10-06 Form sesi guru.
 -   [ ] P10-07 Form kehadiran.
--   [ ] P10-08 Laporan guru tidak hadir.
 -   [ ] P10-09 Kelengkapan dan submit petugas.
 -   [ ] P10-10 Antrean review guru piket.
 -   [ ] P10-11 Revisi dan riwayat.
@@ -984,10 +947,6 @@ yang sudah selesai.
                           mengoreksi kehadiran    
                           setelah sesi selesai?   
 
-  OD-07                   Apakah guru pengganti   Validasi submit
-                          belum terkonfirmasi     
-                          menghalangi submit?     
-
   OD-08                   Ada batas waktu         Reminder/escalation
                           submit/verifikasi?      
 
@@ -1023,9 +982,7 @@ menyetujui. - Aktor dan timestamp tercatat.
 memvalidasi urutan. - JP tidak dipakai sesi lain. - Jurnal menampilkan
 cakupan kedua JP.
 
-**C. Guru tidak hadir** - Petugas melaporkan ketidakhadiran. - Petugas
-tidak dapat mengisi kehadiran sebagai guru. - Guru pengganti dapat
-mengonfirmasi. - Piket melihat laporan.
+**C. Guru tidak hadir** - Tidak ada alur pelaporan atau penggantian guru di aplikasi. - Sesi hanya dicatat oleh guru yang ditetapkan pada jadwal.
 
 **D. Belum diverifikasi saat siswa pulang** - Petugas mengirim jurnal. -
 Status menjadi `SUBMITTED`. - Piket belum memeriksa. - Sistem
@@ -1088,16 +1045,10 @@ diuji.
 
 # 16. Keputusan dan Implementasi Terbaru (2026-11-23)
 
-Bagian ini memperbarui ketentuan lama yang masih menyebut proses penugasan dan konfirmasi guru pengganti.
+## Ketidakhadiran guru
 
-## Guru mengambil alih sesi
-
-- Tidak dibuat tabel `substitute_assignments`, endpoint penugasan guru pengganti, atau proses konfirmasi khusus.
-- Petugas kelas cukup membuat laporan ketidakhadiran guru terjadwal pada JP terkait.
-- Jika guru lain mengambil alih pembelajaran, guru tersebut menggunakan akun sendiri untuk membuat sesi.
-- Backend mengizinkan guru aktif yang berbeda dari guru terjadwal hanya jika laporan ketidakhadiran tersedia untuk setiap JP yang dipilih dalam sesi.
-- `teacher_id` pada sesi dan catatan absensi harus menunjukkan guru yang benar-benar mengajar.
-- Hanya guru pengajar yang tercatat pada sesi yang dapat mengisi atau memperbaiki absensi sesi tersebut.
+- Aplikasi tidak menyediakan tabel, endpoint, atau tampilan untuk laporan ketidakhadiran dan guru pengganti.
+- Sesi hanya dapat dibuat oleh guru yang ditetapkan pada jadwal.
 
 ## Notifikasi dalam aplikasi
 
@@ -1116,7 +1067,7 @@ Bagian ini memperbarui ketentuan lama yang masih menyebut proses penugasan dan k
 - Menjalankan backend dari root project: `python -m uvicorn app.main:app --app-dir backend --reload`.
 - Menjalankan GUI dari root project di terminal kedua: `python -m frontend.app`.
 - GUI dibuka di `http://127.0.0.1:8550/JejakKBM`; dokumentasi API di `http://127.0.0.1:8000/docs`.
-- GUI awal menyediakan login/bootstrap admin, pengelolaan akun dan kelas, pembuatan siswa, penetapan petugas kelas dan periodenya, pembuatan mata pelajaran serta slot jadwal, penugasan guru ke slot, jadwal guru piket, pembuatan dan pengiriman jurnal, laporan guru tidak hadir, inbox pemeriksaan guru piket, pembuatan sesi pembelajaran, input absensi per siswa, dan notifikasi.
+- GUI awal menyediakan login/bootstrap admin, pengelolaan akun dan kelas, pembuatan siswa, penetapan petugas kelas dan periodenya, pembuatan mata pelajaran serta slot jadwal, penugasan guru ke slot, jadwal guru piket, pembuatan dan pengiriman jurnal, inbox pemeriksaan guru piket, pembuatan sesi pembelajaran, input absensi per siswa, dan notifikasi.
 - Pengujian backend setelah migrasi GUI: 112 passed, 1 warning. Endpoint Flet Web mengembalikan HTTP 200; endpoint `/health` backend juga HTTP 200.
 - GUI masih perlu uji manual melalui browser, terutama rangkaian setup admin -> jurnal petugas kelas -> sesi dan absensi guru -> review guru piket. Beberapa input memakai ID hasil pembuatan data agar alur tetap sederhana. Jangan menganggap seluruh alur GUI sudah selesai hanya karena backend tests lulus.
 
@@ -1156,7 +1107,7 @@ Bagian ini memperbarui ketentuan lama yang masih menyebut proses penugasan dan k
 - Teacher GUI now has a quick-start panel under today's WIB schedule: the teacher sees the active class/subject/JP, enters material and (optionally) actual times, then starts/saves the session without selecting a journal or mapel.
 - The previous manual journal/session form remains as a fallback for consecutive JP grouping and older workflows. Attendance entry remains available through the existing session attendance section.
 - Verification: compileall, Flet import, all tests (126 passed, 1 dependency deprecation warning), git diff --check.
-- Remaining: manual browser interaction; periodic automatic refresh; make the attendance form auto-follow the newly created quick session; support alternate teacher flow with an approved absence report in the quick-start endpoint.
+- Remaining: manual browser interaction; periodic automatic refresh; make the attendance form auto-follow the newly created quick session; manual browser interaction remains to be tested.
 
 ## Update 2026-11-23 — Absensi Langsung Setelah Quick Start Guru
 

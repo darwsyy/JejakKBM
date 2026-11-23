@@ -1608,91 +1608,6 @@ def test_class_dashboard_handles_missing_journal_and_unknown_class(client):
 
 
 
-def test_class_officer_can_report_scheduled_teacher_absence(client):
-    journal, teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
-    officer_id = journal["officer_user_id"]
-
-    created = client.post(f"/journals/{journal['id']}/absence-reports", json={
-        "slot_id": slot_ids[0],
-        "officer_user_id": officer_id,
-        "notes": "Guru belum hadir sampai JP dimulai.",
-    })
-    assert created.status_code == 201
-    result = created.json()
-    assert result["journal_id"] == journal["id"]
-    assert result["slot_id"] == slot_ids[0]
-    assert result["jp_number"] == 2
-    assert result["scheduled_teacher_id"] == teacher["id"]
-    assert result["teacher_name"] == teacher["full_name"]
-    assert result["reported_by_user_id"] == officer_id
-    assert result["notes"] == "Guru belum hadir sampai JP dimulai."
-
-    listed = client.get(f"/journals/{journal['id']}/absence-reports")
-    assert listed.status_code == 200
-    assert len(listed.json()) == 1
-
-
-def test_absence_report_rejects_duplicate_and_non_officer(client):
-    journal, teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
-    payload = {
-        "slot_id": slot_ids[0],
-        "officer_user_id": journal["officer_user_id"],
-        "notes": "Guru belum hadir.",
-    }
-    assert client.post(f"/journals/{journal['id']}/absence-reports", json=payload).status_code == 201
-    assert client.post(f"/journals/{journal['id']}/absence-reports", json=payload).status_code == 409
-
-    other_officer = create_user(client, "petugas_lain", role="class_officer").json()
-    forbidden = client.post(f"/journals/{journal['id']}/absence-reports", json={
-        **payload, "officer_user_id": other_officer["id"], "slot_id": slot_ids[1],
-    })
-    assert forbidden.status_code == 403
-
-
-def test_absence_report_rejects_non_lesson_or_slot_with_existing_session(client):
-    journal, teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
-    break_slot = client.post(f"/classes/1/schedule-slots", json={
-        "day_of_week": "Monday", "slot_order": 3, "jp_number": None,
-        "start_time": "10:00", "end_time": "10:15", "slot_type": "BREAK",
-    }).json()
-    payload = {"officer_user_id": journal["officer_user_id"]}
-    non_lesson = client.post(f"/journals/{journal['id']}/absence-reports", json={
-        **payload, "slot_id": break_slot["id"],
-    })
-    assert non_lesson.status_code == 400
-
-    session = client.post(f"/journals/{journal['id']}/sessions", json={
-        "slot_ids": [slot_ids[0]], "teacher_id": teacher["id"],
-        "material": "Materi pembelajaran",
-        "actual_start_time": "08:35", "actual_end_time": "09:10",
-    }).json()
-    journal_id = session["journal_id"]
-    journal_data = client.get(f"/journals/{journal_id}").json()
-    existing_session = client.post(f"/journals/{journal_id}/absence-reports", json={
-        "slot_id": slot_ids[0], "officer_user_id": journal_data["officer_user_id"],
-    })
-    assert existing_session.status_code == 400
-
-
-def test_absence_report_rejects_missing_journal_and_wrong_slot(client):
-    assert client.get("/journals/999/absence-reports").status_code == 404
-    assert client.post("/journals/999/absence-reports", json={
-        "slot_id": 1, "officer_user_id": 1,
-    }).status_code == 404
-
-    journal, teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
-    other_class = create_classroom(client, "X TKJ 2").json()
-    other_slot = client.post(f"/classes/{other_class['id']}/schedule-slots", json={
-        "day_of_week": "Monday", "slot_order": 1, "jp_number": 1,
-        "start_time": "07:45", "end_time": "08:30", "slot_type": "LESSON",
-    }).json()
-    wrong_class = client.post(f"/journals/{journal['id']}/absence-reports", json={
-        "slot_id": other_slot["id"], "officer_user_id": journal["officer_user_id"],
-    })
-    assert wrong_class.status_code == 404
-
-
-
 def test_journal_submission_notifies_duty_teacher(client):
     session, teacher = submit_ready_journal(client)
 
@@ -1748,46 +1663,6 @@ def test_notification_can_be_marked_read_only_by_recipient(client):
 def test_notification_list_rejects_unknown_user(client):
     response = client.get("/notifications?user_id=999")
     assert response.status_code == 404
-
-
-
-def test_another_active_teacher_can_create_session_after_absence_report(client):
-    journal, scheduled_teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
-    actual_teacher = create_user(client, "guru_pengajar_pengganti", role="teacher").json()
-
-    report = client.post(f"/journals/{journal['id']}/absence-reports", json={
-        "slot_id": slot_ids[0],
-        "officer_user_id": 1,
-        "notes": "Guru terjadwal tidak hadir.",
-    })
-    session = client.post(f"/journals/{journal['id']}/sessions", json={
-        "slot_ids": [slot_ids[0]],
-        "teacher_id": actual_teacher["id"],
-        "material": "Materi yang diajarkan guru pengganti",
-        "actual_start_time": "08:35",
-        "actual_end_time": "09:10",
-    })
-
-    assert report.status_code == 201
-    assert session.status_code == 201
-    assert session.json()["teacher_id"] == actual_teacher["id"]
-    assert session.json()["teacher_name"] == actual_teacher["full_name"]
-
-
-def test_another_teacher_still_needs_absence_report(client):
-    journal, scheduled_teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
-    actual_teacher = create_user(client, "guru_lain", role="teacher").json()
-
-    response = client.post(f"/journals/{journal['id']}/sessions", json={
-        "slot_ids": [slot_ids[0]],
-        "teacher_id": actual_teacher["id"],
-        "material": "Materi",
-        "actual_start_time": "08:35",
-        "actual_end_time": "09:10",
-    })
-
-    assert response.status_code == 400
-    assert "laporan ketidakhadiran" in response.json()["detail"].lower()
 
 
 

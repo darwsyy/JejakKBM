@@ -14,15 +14,13 @@ from app.auth import (
     hash_password, require_roles, verify_password,
 )
 from app.models import (
-    AttendanceRecord, ClassAttendanceRecord, ClassRosterNumber, AuditLog, ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, DutyRoster, JournalReview, JournalSession, JournalSessionSlot, Notification, ScheduleSlot, ScheduleTeacherAssignment, TeacherAbsenceReport,
+    AttendanceRecord, ClassAttendanceRecord, ClassRosterNumber, AuditLog, ClassOfficerAssignment, ClassOfficerPeriod, Classroom, DailyJournal, DutyRoster, JournalReview, JournalSession, JournalSessionSlot, Notification, ScheduleSlot, ScheduleTeacherAssignment,
     ScheduleSubjectAssignment, Student, Subject, Teacher, User,
 )
 from app.schemas import (
     ClassDashboardResponse,
     ClassDashboardSessionResponse,
     ClassDashboardReviewResponse,
-    TeacherAbsenceReportCreate,
-    TeacherAbsenceReportResponse,
     NotificationResponse,
     DailyDashboardResponse,
     ClassOfficerResponse,
@@ -817,15 +815,11 @@ def delete_schedule_slot(slot_id: int, db: Session = Depends(get_db)):
             detail="Slot jadwal tidak ditemukan.",
         )
 
-    # Slot yang sudah dipakai jurnal lama tidak boleh dihapus karena
-    # absensi dan riwayat sesi masih merujuk ke slot tersebut.
+    # Slot yang sudah dipakai sesi jurnal tidak boleh dihapus karena riwayatnya masih dirujuk.
     used_in_session = db.query(JournalSessionSlot).filter(
         JournalSessionSlot.slot_id == slot_id
     ).first()
-    has_absence_report = db.query(TeacherAbsenceReport).filter(
-        TeacherAbsenceReport.slot_id == slot_id
-    ).first()
-    if used_in_session is not None or has_absence_report is not None:
+    if used_in_session is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Slot sudah digunakan dalam riwayat jurnal dan tidak dapat dihapus.",
@@ -1786,16 +1780,10 @@ def create_journal_session(
             raise HTTPException(status_code=400, detail="Setiap JP harus memiliki mata pelajaran dan guru pada jadwal.")
         subject_ids.add(subject_assignment.subject_id)
         if teacher_assignment.teacher_id != data.teacher_id:
-            absence_report = db.query(TeacherAbsenceReport).filter(
-                TeacherAbsenceReport.journal_id == journal_id,
-                TeacherAbsenceReport.slot_id == slot.id,
-                TeacherAbsenceReport.scheduled_teacher_id == teacher_assignment.teacher_id,
-            ).first()
-            if absence_report is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Guru sesi harus sesuai jadwal. Jika guru terjadwal tidak hadir, petugas kelas harus membuat laporan ketidakhadiran terlebih dahulu.",
-                )
+            raise HTTPException(
+                status_code=400,
+                detail="Guru pengajar sesi harus sesuai dengan guru yang ditetapkan pada jadwal.",
+            )
 
     if len(subject_ids) != 1:
         raise HTTPException(status_code=400, detail="JP yang digabung harus memiliki mata pelajaran yang sama.")
@@ -2898,127 +2886,3 @@ def get_class_dashboard(
         sessions=session_results,
         reviews=reviews,
     )
-
-
-
-def build_absence_report_response(db: Session, report: TeacherAbsenceReport):
-    slot = db.query(ScheduleSlot).filter(ScheduleSlot.id == report.slot_id).first()
-    teacher = db.query(User).filter(User.id == report.scheduled_teacher_id).first()
-    officer = db.query(User).filter(User.id == report.reported_by_user_id).first()
-    return TeacherAbsenceReportResponse(
-        id=report.id,
-        journal_id=report.journal_id,
-        slot_id=slot.id,
-        jp_number=slot.jp_number,
-        scheduled_teacher_id=teacher.id,
-        teacher_name=teacher.full_name,
-        reported_by_user_id=officer.id,
-        officer_name=officer.full_name,
-        notes=report.notes,
-        reported_at=report.reported_at,
-    )
-
-
-@app.post(
-    "/journals/{journal_id}/absence-reports",
-    response_model=TeacherAbsenceReportResponse,
-    status_code=status.HTTP_201_CREATED,
-    tags=["Teacher Absence"],
-    dependencies=[Depends(get_current_user)])
-def create_teacher_absence_report(
-    journal_id: int,
-    data: TeacherAbsenceReportCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    if current_user.id != data.officer_user_id:
-        raise HTTPException(status_code=403, detail="Token login harus milik petugas kelas yang melapor.")
-    journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
-    if journal is None:
-        raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
-    if journal.status != "DRAFT":
-        raise HTTPException(status_code=400, detail="Laporan hanya dapat ditambahkan saat jurnal DRAFT.")
-    if data.officer_user_id != journal.officer_user_id:
-        raise HTTPException(status_code=403, detail="Hanya petugas jurnal kelas yang ditetapkan yang dapat melapor.")
-
-    officer = db.query(User).filter(User.id == data.officer_user_id).first()
-    if officer is None or officer.role != "class_officer" or not officer.is_active:
-        raise HTTPException(status_code=403, detail="Pelapor harus petugas kelas yang aktif.")
-    officer_period = db.query(ClassOfficerPeriod).filter(
-        ClassOfficerPeriod.class_id == journal.class_id,
-        ClassOfficerPeriod.user_id == data.officer_user_id,
-        ClassOfficerPeriod.start_date <= journal.journal_date,
-    ).filter(
-        (ClassOfficerPeriod.end_date.is_(None))
-        | (ClassOfficerPeriod.end_date >= journal.journal_date)
-    ).first()
-    if officer_period is None:
-        raise HTTPException(status_code=403, detail="Petugas tidak terdaftar pada tanggal jurnal.")
-
-    slot = db.query(ScheduleSlot).filter(
-        ScheduleSlot.id == data.slot_id,
-        ScheduleSlot.class_id == journal.class_id,
-        ScheduleSlot.day_of_week == journal.journal_date.strftime("%A"),
-    ).first()
-    if slot is None:
-        raise HTTPException(status_code=404, detail="Slot jadwal tidak ditemukan untuk kelas dan tanggal jurnal ini.")
-    if slot.slot_type != "LESSON" or slot.jp_number is None:
-        raise HTTPException(status_code=400, detail="Laporan hanya berlaku untuk slot pelajaran (LESSON).")
-
-    teacher_assignment = db.query(ScheduleTeacherAssignment).filter(
-        ScheduleTeacherAssignment.slot_id == slot.id
-    ).first()
-    if teacher_assignment is None:
-        raise HTTPException(status_code=400, detail="Slot belum memiliki guru pengajar terjadwal.")
-    teacher = db.query(User).filter(User.id == teacher_assignment.teacher_id).first()
-    if teacher is None or teacher.role != "teacher" or not teacher.is_active:
-        raise HTTPException(status_code=400, detail="Guru terjadwal tidak aktif atau bukan akun guru.")
-
-    existing_session = db.query(JournalSessionSlot).join(
-        JournalSession, JournalSession.id == JournalSessionSlot.session_id
-    ).filter(
-        JournalSession.journal_id == journal_id,
-        JournalSessionSlot.slot_id == slot.id,
-    ).first()
-    if existing_session is not None:
-        raise HTTPException(status_code=400, detail="JP ini sudah memiliki sesi pembelajaran; tidak dapat dilaporkan sebagai guru tidak hadir.")
-
-    existing_report = db.query(TeacherAbsenceReport).filter(
-        TeacherAbsenceReport.journal_id == journal_id,
-        TeacherAbsenceReport.slot_id == slot.id,
-    ).first()
-    if existing_report is not None:
-        raise HTTPException(status_code=409, detail="Laporan ketidakhadiran untuk JP ini sudah dibuat.")
-
-    report = TeacherAbsenceReport(
-        journal_id=journal_id,
-        slot_id=slot.id,
-        scheduled_teacher_id=teacher.id,
-        reported_by_user_id=officer.id,
-        notes=data.notes.strip() if data.notes and data.notes.strip() else None,
-    )
-    db.add(report)
-    try:
-        db.flush()
-        add_audit_log(db, current_user.id, "TEACHER_ABSENCE_REPORTED", "DailyJournal", journal.id, f"Guru {teacher.full_name} dilaporkan tidak hadir pada JP {slot.jp_number}.")
-        db.commit()
-        db.refresh(report)
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Laporan ketidakhadiran untuk JP ini sudah dibuat.")
-    return build_absence_report_response(db, report)
-
-
-@app.get(
-    "/journals/{journal_id}/absence-reports",
-    response_model=list[TeacherAbsenceReportResponse],
-    tags=["Teacher Absence"],
-    dependencies=[Depends(get_current_user)])
-def get_teacher_absence_reports(journal_id: int, db: Session = Depends(get_db)):
-    journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
-    if journal is None:
-        raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
-    reports = db.query(TeacherAbsenceReport).filter(
-        TeacherAbsenceReport.journal_id == journal_id
-    ).order_by(TeacherAbsenceReport.slot_id).all()
-    return [build_absence_report_response(db, report) for report in reports]
