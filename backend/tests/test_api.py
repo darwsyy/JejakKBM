@@ -19,14 +19,6 @@ class TestActorId:
         return False
 
 
-class TestActorRole:
-    def __eq__(self, other):
-        return True
-
-    def __ne__(self, other):
-        return False
-
-
 @pytest.fixture
 def client():
     test_engine = create_engine(
@@ -49,10 +41,10 @@ def client():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    # Dependency actor dibuat fleksibel untuk tes alur bisnis.
+    # Aktor admin default untuk pengujian alur bisnis lama.
     test_admin = SimpleNamespace(
         id=TestActorId(), username="test_admin", full_name="Test Admin",
-        role=TestActorRole(), is_active=True, password_hash=None, token_version=0,
+        role="admin", is_active=True, password_hash=None, token_version=0,
     )
     app.dependency_overrides[get_current_user] = lambda: test_admin
 
@@ -2179,3 +2171,165 @@ def test_cannot_deactivate_last_active_admin(client):
 
     assert response.status_code == 400
     assert "admin aktif terakhir" in response.json()["detail"]
+
+
+def test_teacher_cannot_read_another_teachers_journal_or_attendance(client):
+    journal, assigned_teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
+    outsider = create_user(client, "guru_tidak_terkait", role="teacher").json()
+    client.put(
+        f"/users/{outsider['id']}/password",
+        json={"password": "password-guru-123"},
+    )
+    login = client.post("/auth/login", json={
+        "username": "guru_tidak_terkait",
+        "password": "password-guru-123",
+    })
+    assert login.status_code == 200
+
+    app.dependency_overrides.pop(get_current_user, None)
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    journal_detail = client.get(f"/journals/{journal['id']}", headers=headers)
+    sessions = client.get(f"/journals/{journal['id']}/sessions", headers=headers)
+    session = client.post(
+        f"/journals/{journal['id']}/sessions",
+        json={
+            "slot_ids": slot_ids,
+            "teacher_id": assigned_teacher["id"],
+            "material": "Materi pengujian",
+            "actual_start_time": "08:30",
+            "actual_end_time": "10:00",
+        },
+        headers=headers,
+    )
+    assert session.status_code == 403
+
+    # Buat sesi sebagai guru yang memang ditugaskan, lalu uji akses guru lain.
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=assigned_teacher["id"],
+        username=assigned_teacher["username"],
+        full_name=assigned_teacher["full_name"],
+        role="teacher",
+        is_active=True,
+        password_hash=None,
+        token_version=0,
+    )
+    created_session = client.post(
+        f"/journals/{journal['id']}/sessions",
+        json={
+            "slot_ids": slot_ids,
+            "teacher_id": assigned_teacher["id"],
+            "material": "Materi pengujian",
+            "actual_start_time": "08:30",
+            "actual_end_time": "10:00",
+        },
+    )
+    assert created_session.status_code == 201
+    app.dependency_overrides.pop(get_current_user, None)
+
+    session_id = created_session.json()["id"]
+    class_attendance = client.get(
+        f"/journal-sessions/{session_id}/class-attendance", headers=headers
+    )
+    completeness = client.get(
+        f"/journal-sessions/{session_id}/attendance/completeness",
+        headers=headers,
+    )
+    class_roster = client.get(
+        f"/classes/{journal['class_id']}/roster", headers=headers
+    )
+
+    assert journal_detail.status_code == 403
+    assert sessions.status_code == 403
+    assert class_attendance.status_code == 403
+    assert completeness.status_code == 403
+    assert class_roster.status_code == 403
+
+
+def test_teacher_read_permissions_limit_personal_and_admin_data(client):
+    admin = create_user(client, "admin_read_scope", role="admin").json()
+    classroom = create_classroom(client, "X TKJ Read Scope").json()
+    officer = create_user(client, "petugas_read_scope").json()
+    create_officer_period(client, classroom["id"], officer["id"])
+    client.post("/students", json={
+        "nis": "SCOPE001", "full_name": "Siswa Privat",
+        "class_id": classroom["id"],
+    })
+
+    first_teacher = create_user(client, "guru_scope_1", role="teacher").json()
+    second_teacher = create_user(client, "guru_scope_2", role="teacher").json()
+    for teacher in (first_teacher, second_teacher):
+        client.put(
+            f"/users/{teacher['id']}/password",
+            json={"password": "password-guru-123"},
+        )
+    for teacher in (first_teacher, second_teacher):
+        created = client.post("/duty-rosters", json={
+            "duty_date": "2026-11-25",
+            "teacher_user_id": teacher["id"],
+            "assigned_by_user_id": admin["id"],
+        })
+        assert created.status_code == 201
+
+    login = client.post("/auth/login", json={
+        "username": "guru_scope_1",
+        "password": "password-guru-123",
+    })
+    assert login.status_code == 200
+    app.dependency_overrides.pop(get_current_user, None)
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    students = client.get("/students", headers=headers)
+    teachers = client.get("/teachers", headers=headers)
+    officer_periods = client.get(
+        f"/classes/{classroom['id']}/officer-periods", headers=headers
+    )
+    duty_rosters = client.get("/duty-rosters", headers=headers)
+
+    assert students.status_code == 403
+    assert teachers.status_code == 403
+    assert officer_periods.status_code == 403
+    assert duty_rosters.status_code == 200
+    assert [item["teacher_user_id"] for item in duty_rosters.json()] == [
+        first_teacher["id"]
+    ]
+
+
+def test_class_officer_cannot_access_another_classes_journal(client):
+    first_class = create_classroom(client, "X TKJ Officer A").json()
+    second_class = create_classroom(client, "X TKJ Officer B").json()
+    first_officer = create_user(client, "petugas_scope_a").json()
+    second_officer = create_user(client, "petugas_scope_b").json()
+    create_officer_period(client, first_class["id"], first_officer["id"])
+    create_officer_period(client, second_class["id"], second_officer["id"])
+    journal = client.post("/journals", json={
+        "class_id": first_class["id"],
+        "journal_date": "2026-11-25",
+        "officer_user_id": first_officer["id"],
+    }).json()
+
+    client.put(
+        f"/users/{second_officer['id']}/password",
+        json={"password": "password-petugas-123"},
+    )
+    login = client.post("/auth/login", json={
+        "username": "petugas_scope_b",
+        "password": "password-petugas-123",
+    })
+    assert login.status_code == 200
+    app.dependency_overrides.pop(get_current_user, None)
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    detail = client.get(f"/journals/{journal['id']}", headers=headers)
+    journal_list = client.get("/journals", headers=headers)
+    dashboard = client.get(
+        f"/dashboard/classes/{first_class['id']}?report_date=2026-11-25",
+        headers=headers,
+    )
+    roster = client.get(f"/classes/{first_class['id']}/roster", headers=headers)
+
+    assert detail.status_code == 403
+    assert journal_list.status_code == 200
+    assert journal_list.json() == []
+    assert dashboard.status_code == 403
+    assert roster.status_code == 403

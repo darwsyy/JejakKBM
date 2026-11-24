@@ -119,11 +119,14 @@ python -m pytest -q
 ## Login pertama kali
 
 1. Siapkan database dan jalankan API.
-2. Sebelum menjalankan API, atur secret token di PowerShell:
+2. Untuk pengembangan lokal, aplikasi memakai secret development bawaan. Untuk menjalankan mode production, atur environment dan secret kuat di PowerShell sebelum menjalankan API:
 
 ```powershell
-$env:JEJAKKBM_SECRET_KEY = "ganti-dengan-secret-random-yang-panjang"
+$env:JEJAKKBM_ENV = "production"
+$env:JEJAKKBM_SECRET_KEY = (python -c "import secrets; print(secrets.token_urlsafe(48))")
 ```
+
+Secret production wajib minimal 32 karakter. Simpan nilainya dengan aman dan gunakan secret yang sama setiap kali server dimulai ulang. Mengganti secret akan membuat token login lama tidak valid.
 
 3. Buka `/docs`, lalu gunakan `POST /auth/bootstrap` untuk membuat admin pertama. Contoh JSON:
 
@@ -277,3 +280,34 @@ JejakKBM menggunakan Flet untuk GUI. Kode tampilan berada di `frontend/app.py` d
 3. GUI terbuka melalui browser di `http://127.0.0.1:8550/JejakKBM`. Dokumentasi API tersedia di `http://127.0.0.1:8000/docs`.
 
 Jika dependency belum terpasang, jalankan `python -m pip install -r requirements.txt`. Pada penggunaan pertama, buat admin melalui bagian **Setup awal** di layar login. Setelah itu admin dapat membuat akun pengguna dan mengatur password awalnya.
+
+
+### Backup dan restore database SQLite
+
+Jalankan perintah dari folder utama proyek. File backup disimpan di folder `backups/` dan tidak dimasukkan ke Git.
+
+Membuat backup:
+
+```powershell
+python backend/manage_database.py backup
+```
+
+Melihat daftar backup:
+
+```powershell
+python backend/manage_database.py list
+```
+
+Memulihkan backup:
+
+1. Matikan server backend JejakKBM terlebih dahulu.
+2. Lihat nama file backup dengan perintah `list`.
+3. Jalankan restore menggunakan nama file yang tepat:
+
+```powershell
+python backend/manage_database.py restore NAMA_FILE_BACKUP.db --confirm
+```
+
+Sebelum mengganti database aktif, utilitas akan membuat backup pengaman dengan label `before_restore`. File backup juga diperiksa menggunakan `PRAGMA integrity_check`. Jika pemeriksaan gagal, proses restore dibatalkan dan database aktif tidak diganti.
+
+**Penting:** jangan hapus file backup pengaman sebelum memastikan aplikasi berjalan dan data hasil pemulihan sudah benar. Simpan salinan backup penting di media penyimpanan lain; folder backup lokal bukan pengganti backup eksternal.

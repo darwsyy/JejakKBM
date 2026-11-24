@@ -17,7 +17,28 @@ from app.models import User
 
 PASSWORD_ITERATIONS = 310_000
 TOKEN_LIFETIME_SECONDS = 60 * 60 * 8
-SECRET_KEY = os.getenv("JEJAKKBM_SECRET_KEY", "development-only-change-this-secret")
+DEVELOPMENT_SECRET_KEY = "development-only-change-this-secret"
+
+
+def load_secret_key(environment: str, configured_key: str | None) -> str:
+    """Gunakan secret kuat saat production; fallback hanya untuk development lokal."""
+    if environment.lower() == "production":
+        if not configured_key or configured_key == DEVELOPMENT_SECRET_KEY:
+            raise RuntimeError(
+                "JEJAKKBM_SECRET_KEY wajib diatur dengan nilai rahasia saat production."
+            )
+        if len(configured_key) < 32:
+            raise RuntimeError(
+                "JEJAKKBM_SECRET_KEY production minimal 32 karakter."
+            )
+        return configured_key
+    return configured_key or DEVELOPMENT_SECRET_KEY
+
+
+APP_ENVIRONMENT = os.getenv("JEJAKKBM_ENV", "development")
+SECRET_KEY = load_secret_key(
+    APP_ENVIRONMENT, os.getenv("JEJAKKBM_SECRET_KEY")
+)
 
 
 def hash_password(password: str) -> str:

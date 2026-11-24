@@ -135,6 +135,34 @@ def ensure_session_access(
     raise HTTPException(status_code=403, detail="Anda tidak memiliki akses ke sesi pembelajaran ini.")
 
 
+def ensure_class_roster_access(db: Session, class_id: int, user: User) -> None:
+    if user.role == "admin":
+        return
+
+    today_wib = datetime.now(ZoneInfo("Asia/Jakarta")).date()
+    if user.role == "class_officer":
+        assignment = db.query(ClassOfficerPeriod.id).filter(
+            ClassOfficerPeriod.class_id == class_id,
+            ClassOfficerPeriod.user_id == user.id,
+            ClassOfficerPeriod.start_date <= today_wib,
+            (ClassOfficerPeriod.end_date.is_(None))
+            | (ClassOfficerPeriod.end_date >= today_wib),
+        ).first()
+        if assignment:
+            return
+    elif user.role == "teacher":
+        assignment = db.query(ScheduleTeacherAssignment.slot_id).join(
+            ScheduleSlot, ScheduleSlot.id == ScheduleTeacherAssignment.slot_id
+        ).filter(
+            ScheduleSlot.class_id == class_id,
+            ScheduleSlot.day_of_week == today_wib.strftime("%A"),
+            ScheduleTeacherAssignment.teacher_id == user.id,
+        ).first()
+        if assignment:
+            return
+    raise HTTPException(status_code=403, detail="Anda tidak memiliki akses ke daftar nomor absen kelas.")
+
+
 @app.post("/auth/bootstrap", response_model=UserResponse, status_code=201, tags=["Authentication"])
 def bootstrap_admin(data: AdminBootstrap, db: Session = Depends(get_db)):
     """Membuat admin pertama saat database belum memiliki admin ber-password."""
@@ -468,10 +496,15 @@ def get_classrooms(db: Session = Depends(get_db)):
     tags=["Class Roster"],
     dependencies=[Depends(get_current_user)],
 )
-def get_class_roster(class_id: int, db: Session = Depends(get_db)):
+def get_class_roster(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
     if classroom is None:
         raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+    ensure_class_roster_access(db, class_id, current_user)
     rows = db.query(ClassRosterNumber).filter(
         ClassRosterNumber.class_id == class_id,
         ClassRosterNumber.is_active.is_(True),
@@ -1054,7 +1087,7 @@ def create_student(data: StudentCreate, db: Session = Depends(get_db)):
     return student
 
 
-@app.get("/students", response_model=list[StudentResponse], tags=["Students"], dependencies=[Depends(get_current_user)])
+@app.get("/students", response_model=list[StudentResponse], tags=["Students"], dependencies=[Depends(require_roles("admin"))])
 def get_students(class_id: int | None = None, db: Session = Depends(get_db)):
     query = db.query(Student)
     if class_id is not None:
@@ -1197,7 +1230,7 @@ def create_teacher(data: TeacherCreate, db: Session = Depends(get_db)):
     )
 
 
-@app.get("/teachers", response_model=list[TeacherResponse], tags=["Teachers"], dependencies=[Depends(get_current_user)])
+@app.get("/teachers", response_model=list[TeacherResponse], tags=["Teachers"], dependencies=[Depends(require_roles("admin"))])
 def get_teachers(db: Session = Depends(get_db)):
     records = db.query(Teacher, User).join(User, Teacher.user_id == User.id).order_by(User.full_name).all()
     return [
@@ -1319,7 +1352,7 @@ def create_class_officer_period(
     "/classes/{class_id}/officer-periods",
     response_model=list[ClassOfficerPeriodResponse],
     tags=["Class Officer"],
-    dependencies=[Depends(get_current_user)])
+    dependencies=[Depends(require_roles("admin"))])
 def get_class_officer_periods(class_id: int, db: Session = Depends(get_db)):
     classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
     if classroom is None:
@@ -1544,6 +1577,7 @@ def get_teacher_current_schedule(
     response_model=JournalSessionResponse,
     status_code=status.HTTP_201_CREATED,
     tags=["Journal Sessions"],
+    dependencies=[Depends(require_roles("teacher"))],
 )
 def create_session_for_current_teacher_slot(
     data: TeacherCurrentSessionCreate,
@@ -2092,10 +2126,15 @@ def build_class_attendance_response(
     tags=["Attendance"],
     dependencies=[Depends(get_current_user)],
 )
-def get_class_attendance(session_id: int, db: Session = Depends(get_db)):
+def get_class_attendance(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     session = db.query(JournalSession).filter(JournalSession.id == session_id).first()
     if session is None:
         raise HTTPException(status_code=404, detail="Sesi pembelajaran tidak ditemukan.")
+    ensure_session_access(db, session, current_user)
     records = db.query(ClassAttendanceRecord).filter(
         ClassAttendanceRecord.session_id == session_id
     ).order_by(
@@ -2199,11 +2238,12 @@ def get_attendance_completeness(
     session_id: int,
     slot_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     session = db.query(JournalSession).filter(JournalSession.id == session_id).first()
     if session is None:
         raise HTTPException(status_code=404, detail="Sesi pembelajaran tidak ditemukan.")
-    journal = db.query(DailyJournal).filter(DailyJournal.id == session.journal_id).first()
+    journal = ensure_session_access(db, session, current_user)
     links = db.query(JournalSessionSlot).filter(
         JournalSessionSlot.session_id == session_id
     ).all()
@@ -2499,8 +2539,16 @@ def create_duty_roster(
 
 
 @app.get("/duty-rosters", response_model=list[DutyRosterResponse], tags=["Duty Rosters"], dependencies=[Depends(get_current_user)])
-def get_duty_rosters(duty_date: date | None = None, db: Session = Depends(get_db)):
+def get_duty_rosters(
+    duty_date: date | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     query = db.query(DutyRoster)
+    if current_user.role == "teacher":
+        query = query.filter(DutyRoster.teacher_user_id == current_user.id)
+    elif current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Hanya admin dan guru yang dapat melihat jadwal piket.")
     if duty_date is not None:
         query = query.filter(DutyRoster.duty_date == duty_date)
     rosters = query.order_by(DutyRoster.duty_date, DutyRoster.id).all()
@@ -2915,11 +2963,12 @@ def get_class_dashboard(
         if assigned is None:
             raise HTTPException(status_code=403, detail="Anda tidak memiliki akses ke kelas ini.")
     elif current_user.role == "teacher":
-        is_scheduled = db.query(ScheduleTeacherAssignment.id).join(
+        is_scheduled = db.query(ScheduleTeacherAssignment.slot_id).join(
             ScheduleSlot, ScheduleSlot.id == ScheduleTeacherAssignment.slot_id
         ).filter(
             ScheduleTeacherAssignment.teacher_id == int(current_user.id),
             ScheduleSlot.class_id == class_id,
+            ScheduleSlot.day_of_week == selected_date.strftime("%A"),
         ).first()
         is_duty = db.query(DutyRoster.id).filter(
             DutyRoster.teacher_user_id == int(current_user.id),

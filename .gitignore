@@ -15,6 +15,7 @@ htmlcov/
 
 # Local database files
 *.db
+/backups/
 *.sqlite
 *.sqlite3
 
