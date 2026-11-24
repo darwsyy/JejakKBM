@@ -239,12 +239,16 @@ Secret production wajib minimal 32 karakter. Simpan nilainya dengan aman dan gun
 - Dua slot yang waktunya tepat bersebelahan tetap diperbolehkan, misalnya 08:30â€“09:15 dan 09:15â€“10:00.
 - Jadwal khusus seperti Apel, Kokurikuler, Istirahat, dan kegiatan lain dimasukkan sebagai tipe slot yang sesuai. Jadwal rutin sekolah diatur melalui slot per hari.
 
-### Laporan administrasi
+### Laporan administrasi dan rekap KBM
 
-- `GET /reports/attendance?class_id=1&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` menampilkan rekap status absensi siswa untuk satu kelas.
-- `GET /reports/attendance.csv?class_id=1&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` mengunduh rekap yang sama dalam format CSV.
-- Kedua laporan hanya dapat dibuka oleh akun admin.
-- Rentang laporan maksimal 366 hari agar permintaan tetap ringan.
+- `GET /reports/class-attendance-matrix?class_id=1&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` menampilkan rekap absensi anonim berdasarkan nomor absen dan tanggal. Kode: H hadir, S sakit, I izin, D dispensasi, A alpa, dan - belum ada catatan.
+- `GET /reports/kbm-implementation?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` menampilkan ringkasan pelaksanaan KBM seluruh kelas. Tambahkan `&class_id=1` untuk satu kelas.
+- Rekap KBM memuat JP terjadwal, JP yang tercatat dalam sesi jurnal, persentase pelaksanaan, jumlah jurnal, sesi, jurnal yang sudah disubmit, dan jurnal disetujui.
+- Ekspor tersedia melalui `/reports/kbm-implementation.csv`, `/reports/kbm-implementation.xlsx`, dan `/reports/kbm-implementation.pdf` dengan parameter tanggal dan kelas yang sama.
+- GUI admin menyediakan filter tanggal/kelas, tampilan tabel rekap, serta tombol ekspor CSV, Excel, dan PDF.
+- Semua laporan administrasi hanya dapat dibuka oleh akun admin. Rentang laporan maksimal 366 hari.
+- Catatan perhitungan: JP terjadwal dihitung dari jadwal mingguan pada rentang tanggal. Hari libur dan perubahan jadwal khusus belum dikurangi, sehingga persentase adalah indikator berdasarkan jadwal rutin, bukan absensi kalender sekolah resmi.
+- Endpoint `/reports/attendance` dan `/reports/attendance.csv` adalah laporan kompatibilitas untuk data absensi siswa bernama yang lama; gunakan matriks nomor absen untuk alur absensi anonim yang sekarang.
 
 
 ### Perlindungan riwayat jurnal

@@ -506,6 +506,114 @@ def main(page: ft.Page):
                 matrix_result,
             ])
 
+            report_class = ft.Dropdown(
+                label="Filter kelas (kosong = semua kelas)",
+                width=320,
+                options=[
+                    ft.DropdownOption(key=str(c["id"]), text=c["name"])
+                    for c in classes
+                ],
+            )
+            report_start = field(
+                "Tanggal mulai (YYYY-MM-DD)",
+                str(date.today().replace(day=1)),
+            )
+            report_end = field("Tanggal akhir (YYYY-MM-DD)", str(date.today()))
+            report_result = ft.Column(spacing=4)
+            export_picker = ft.FilePicker()
+            page.overlay.append(export_picker)
+
+            def report_params():
+                params = {
+                    "start_date": report_start.value.strip(),
+                    "end_date": report_end.value.strip(),
+                }
+                if report_class.value:
+                    params["class_id"] = int(report_class.value)
+                return params
+
+            def load_kbm_report(_=None):
+                try:
+                    result = api.get("/reports/kbm-implementation", report_params())
+                    report_result.controls.clear()
+                    report_result.controls.extend([
+                        ft.Text(
+                            f"Periode {result['start_date']} s.d. {result['end_date']}",
+                            weight=ft.FontWeight.BOLD,
+                        ),
+                        ft.Text(
+                            f"Kelas: {result['class_count']} • "
+                            f"JP terjadwal: {result['scheduled_jp']} • "
+                            f"JP tercatat: {result['recorded_jp']} • "
+                            f"Jurnal: {result['journals']} • Sesi: {result['sessions']}"
+                        ),
+                    ])
+                    columns = [
+                        ft.DataColumn(ft.Text("Kelas")),
+                        ft.DataColumn(ft.Text("JP Jadwal")),
+                        ft.DataColumn(ft.Text("JP Catat")),
+                        ft.DataColumn(ft.Text("Pelaksanaan")),
+                        ft.DataColumn(ft.Text("Jurnal")),
+                        ft.DataColumn(ft.Text("Sesi")),
+                        ft.DataColumn(ft.Text("Disetujui")),
+                    ]
+                    rows = [
+                        ft.DataRow(cells=[
+                            ft.DataCell(ft.Text(item["class_name"])),
+                            ft.DataCell(ft.Text(str(item["scheduled_jp"]))),
+                            ft.DataCell(ft.Text(str(item["recorded_jp"]))),
+                            ft.DataCell(ft.Text(
+                                f"{item['implementation_rate']}%"
+                                if item["implementation_rate"] is not None else "-"
+                            )),
+                            ft.DataCell(ft.Text(str(item["journals"]))),
+                            ft.DataCell(ft.Text(str(item["sessions"]))),
+                            ft.DataCell(ft.Text(str(item["approved"]))),
+                        ])
+                        for item in result["classes"]
+                    ]
+                    report_result.controls.append(
+                        ft.DataTable(columns=columns, rows=rows, column_spacing=14)
+                    )
+                    report_result.controls.append(
+                        ft.Text(result["schedule_note"], size=12, color=ft.Colors.GREY_700)
+                    )
+                    page.update()
+                except Exception as error:
+                    notify(str(error), True)
+
+            async def download_kbm_report(extension):
+                try:
+                    content = api.download(
+                        f"/reports/kbm-implementation.{extension}",
+                        report_params(),
+                    )
+                    filename = (
+                        f"rekap_kbm_{report_start.value.strip()}_"
+                        f"{report_end.value.strip()}.{extension}"
+                    )
+                    saved_path = await export_picker.save_file(
+                        dialog_title="Simpan rekap KBM",
+                        file_name=filename,
+                        allowed_extensions=[extension],
+                        src_bytes=content,
+                    )
+                    if saved_path:
+                        notify(f"File berhasil disimpan: {saved_path}")
+                except Exception as error:
+                    notify(str(error), True)
+
+            section("Rekap pelaksanaan KBM", [
+                report_class, ft.Row([report_start, report_end]),
+                ft.Row([
+                    button("Tampilkan rekap", load_kbm_report, True),
+                    button("Ekspor Excel", lambda _: download_kbm_report("xlsx")),
+                    button("Ekspor PDF", lambda _: download_kbm_report("pdf")),
+                    button("Ekspor CSV", lambda _: download_kbm_report("csv")),
+                ], wrap=True),
+                report_result,
+            ])
+
             schedule_class = ft.Dropdown(
                 label="Kelas jadwal", width=320,
                 options=[ft.DropdownOption(key=str(c["id"]), text=f"{c['name']} (ID {c['id']})") for c in classes],

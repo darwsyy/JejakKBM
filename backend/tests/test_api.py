@@ -1933,6 +1933,76 @@ def test_daily_schedule_shows_slots_and_actual_teacher(client):
     assert first_slot["actual_teacher_id"] == teacher["id"]
 
 
+def test_kbm_implementation_report_and_csv(client):
+    journal, teacher, slot_ids = setup_journal_with_two_lesson_slots(client)
+    created_session = client.post(
+        f"/journals/{journal['id']}/sessions",
+        json={
+            "slot_ids": slot_ids,
+            "teacher_id": teacher["id"],
+            "material": "Persamaan linear",
+            "actual_start_time": "08:30",
+            "actual_end_time": "10:00",
+        },
+    )
+    assert created_session.status_code == 201
+    client.put("/classes/1/roster", json={"roster_size": 2})
+    attendance_saved = client.post(
+        f"/journal-sessions/{created_session.json()['id']}/class-attendance",
+        json={
+            "slot_id": slot_ids[0],
+            "teacher_id": teacher["id"],
+            "records": [
+                {"attendance_number": 1, "attendance_status": "PRESENT"},
+                {"attendance_number": 2, "attendance_status": "ABSENT"},
+            ],
+        },
+    )
+    assert attendance_saved.status_code == 201
+
+    report = client.get(
+        "/reports/kbm-implementation"
+        "?start_date=2026-11-23&end_date=2026-11-23"
+    )
+    csv_report = client.get(
+        "/reports/kbm-implementation.csv"
+        "?start_date=2026-11-23&end_date=2026-11-23"
+    )
+    excel_report = client.get(
+        "/reports/kbm-implementation.xlsx"
+        "?start_date=2026-11-23&end_date=2026-11-23"
+    )
+    pdf_report = client.get(
+        "/reports/kbm-implementation.pdf"
+        "?start_date=2026-11-23&end_date=2026-11-23"
+    )
+
+    assert report.status_code == 200
+    result = report.json()
+    assert result["class_count"] == 1
+    assert result["scheduled_jp"] == 2
+    assert result["recorded_jp"] == 2
+    assert result["sessions"] == 1
+    assert result["attendance_counts"]["PRESENT"] == 1
+    assert result["attendance_counts"]["ABSENT"] == 1
+    assert result["classes"][0]["implementation_rate"] == 100.0
+    assert csv_report.status_code == 200
+    assert "JP Terjadwal,JP Tercatat" in csv_report.text
+    assert "X TKJ 1" in csv_report.text
+    assert excel_report.status_code == 200
+    assert excel_report.content.startswith(b"PK")
+    assert pdf_report.status_code == 200
+    assert pdf_report.content.startswith(b"%PDF")
+
+
+def test_kbm_implementation_report_rejects_invalid_range(client):
+    response = client.get(
+        "/reports/kbm-implementation"
+        "?start_date=2026-11-24&end_date=2026-11-23"
+    )
+    assert response.status_code == 422
+
+
 def test_class_attendance_matrix_returns_number_by_date(client):
     session, teacher, _student, slot_ids = setup_session_with_student(client)
     client.put("/classes/1/roster", json={"roster_size": 2})
@@ -2327,9 +2397,15 @@ def test_class_officer_cannot_access_another_classes_journal(client):
         headers=headers,
     )
     roster = client.get(f"/classes/{first_class['id']}/roster", headers=headers)
+    admin_report = client.get(
+        "/reports/kbm-implementation"
+        "?start_date=2026-11-23&end_date=2026-11-25",
+        headers=headers,
+    )
 
     assert detail.status_code == 403
     assert journal_list.status_code == 200
     assert journal_list.json() == []
     assert dashboard.status_code == 403
     assert roster.status_code == 403
+    assert admin_report.status_code == 403

@@ -1,7 +1,7 @@
 import csv
 import re
-from datetime import date, datetime
-from io import StringIO
+from datetime import date, datetime, timedelta
+from io import BytesIO, StringIO
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
@@ -2724,6 +2724,313 @@ def build_attendance_report(
             StudentAttendanceSummary(**item)
             for item in sorted(student_totals.values(), key=lambda row: row["full_name"])
         ],
+    )
+
+
+def build_kbm_implementation_report(
+    db: Session, start_date: date, end_date: date, class_id: int | None = None
+) -> dict:
+    """Ringkas JP terjadwal dan tercatat berdasarkan jurnal serta sesi KBM."""
+    if end_date < start_date or (end_date - start_date).days > 366:
+        raise HTTPException(
+            status_code=422,
+            detail="Rentang tanggal tidak valid (maksimal 366 hari).",
+        )
+
+    class_query = db.query(Classroom).order_by(Classroom.name)
+    if class_id is not None:
+        class_query = class_query.filter(Classroom.id == class_id)
+    classrooms = class_query.all()
+    if class_id is not None and not classrooms:
+        raise HTTPException(status_code=404, detail="Kelas tidak ditemukan.")
+
+    journals_query = db.query(DailyJournal).filter(
+        DailyJournal.journal_date >= start_date,
+        DailyJournal.journal_date <= end_date,
+    )
+    if class_id is not None:
+        journals_query = journals_query.filter(DailyJournal.class_id == class_id)
+    journals = journals_query.all()
+    journal_ids = [item.id for item in journals]
+    journal_by_id = {item.id: item for item in journals}
+
+    sessions = db.query(JournalSession).filter(
+        JournalSession.journal_id.in_(journal_ids)
+    ).all() if journal_ids else []
+    session_ids = [item.id for item in sessions]
+    links = db.query(JournalSessionSlot).filter(
+        JournalSessionSlot.session_id.in_(session_ids)
+    ).all() if session_ids else []
+    slot_by_id = {
+        item.id: item for item in db.query(ScheduleSlot).filter(
+            ScheduleSlot.id.in_([link.slot_id for link in links])
+        ).all()
+    } if links else {}
+
+    attendance_rows = db.query(ClassAttendanceRecord).filter(
+        ClassAttendanceRecord.session_id.in_(session_ids)
+    ).all() if session_ids else []
+    attendance_counts = {
+        "PRESENT": 0, "SICK": 0, "PERMITTED": 0, "DISPENSED": 0, "ABSENT": 0
+    }
+    for record in attendance_rows:
+        if record.attendance_status in attendance_counts:
+            attendance_counts[record.attendance_status] += 1
+
+    journal_by_class = {}
+    for journal in journals:
+        journal_by_class.setdefault(journal.class_id, []).append(journal)
+    sessions_by_class = {}
+    for session in sessions:
+        journal = journal_by_id[session.journal_id]
+        sessions_by_class.setdefault(journal.class_id, []).append(session)
+
+    result_rows = []
+    day_count = (end_date - start_date).days + 1
+    for classroom in classrooms:
+        scheduled_slots = db.query(ScheduleSlot).filter(
+            ScheduleSlot.class_id == classroom.id,
+            ScheduleSlot.slot_type == "LESSON",
+        ).all()
+        scheduled_by_weekday = {}
+        for slot in scheduled_slots:
+            scheduled_by_weekday[slot.day_of_week] = (
+                scheduled_by_weekday.get(slot.day_of_week, 0) + 1
+            )
+        scheduled_jp = 0
+        for offset in range(day_count):
+            current_day = start_date + timedelta(days=offset)
+            scheduled_jp += scheduled_by_weekday.get(current_day.strftime("%A"), 0)
+
+        class_journals = journal_by_class.get(classroom.id, [])
+        class_sessions = sessions_by_class.get(classroom.id, [])
+        class_session_ids = {item.id for item in class_sessions}
+        jp_taught = sum(
+            1 for link in links
+            if link.session_id in class_session_ids and link.slot_id in slot_by_id
+        )
+        status_counts = {
+            "DRAFT": 0, "SUBMITTED": 0, "RESUBMITTED": 0,
+            "REVISION_REQUIRED": 0, "APPROVED": 0, "REJECTED": 0,
+        }
+        for journal in class_journals:
+            if journal.status in status_counts:
+                status_counts[journal.status] += 1
+
+        result_rows.append({
+            "class_id": classroom.id,
+            "class_name": classroom.name,
+            "scheduled_jp": scheduled_jp,
+            "recorded_jp": jp_taught,
+            "implementation_rate": round(jp_taught / scheduled_jp * 100, 1)
+            if scheduled_jp else None,
+            "journals": len(class_journals),
+            "sessions": len(class_sessions),
+            "submitted": status_counts["SUBMITTED"] + status_counts["RESUBMITTED"]
+            + status_counts["REVISION_REQUIRED"] + status_counts["APPROVED"]
+            + status_counts["REJECTED"],
+            "approved": status_counts["APPROVED"],
+            "status_counts": status_counts,
+        })
+
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "class_count": len(classrooms),
+        "scheduled_jp": sum(row["scheduled_jp"] for row in result_rows),
+        "recorded_jp": sum(row["recorded_jp"] for row in result_rows),
+        "journals": sum(row["journals"] for row in result_rows),
+        "sessions": sum(row["sessions"] for row in result_rows),
+        "attendance_counts": attendance_counts,
+        "classes": result_rows,
+        "schedule_note": (
+            "JP terjadwal dihitung dari jadwal mingguan yang aktif pada rentang tanggal. "
+            "Hari libur dan perubahan jadwal khusus belum dikurangi."
+        ),
+    }
+
+
+@app.get(
+    "/reports/kbm-implementation",
+    tags=["Reports"],
+    dependencies=[Depends(require_roles("admin"))],
+)
+def get_kbm_implementation_report(
+    start_date: date,
+    end_date: date,
+    class_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    return build_kbm_implementation_report(db, start_date, end_date, class_id)
+
+
+@app.get(
+    "/reports/kbm-implementation.csv",
+    tags=["Reports"],
+    dependencies=[Depends(require_roles("admin"))],
+)
+def export_kbm_implementation_csv(
+    start_date: date,
+    end_date: date,
+    class_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    report = build_kbm_implementation_report(db, start_date, end_date, class_id)
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Kelas", "JP Terjadwal", "JP Tercatat", "Persentase Pelaksanaan",
+        "Jumlah Jurnal", "Jumlah Sesi", "Jurnal Disubmit", "Jurnal Disetujui",
+    ])
+    for item in report["classes"]:
+        writer.writerow([
+            item["class_name"], item["scheduled_jp"], item["recorded_jp"],
+            item["implementation_rate"], item["journals"], item["sessions"],
+            item["submitted"], item["approved"],
+        ])
+    filename = f"rekap_kbm_{start_date}_{end_date}.csv"
+    return Response(
+        content="\ufeff" + output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get(
+    "/reports/kbm-implementation.xlsx",
+    tags=["Reports"],
+    dependencies=[Depends(require_roles("admin"))],
+)
+def export_kbm_implementation_xlsx(
+    start_date: date,
+    end_date: date,
+    class_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    report = build_kbm_implementation_report(db, start_date, end_date, class_id)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Rekap KBM"
+    sheet.append(["REKAP PELAKSANAAN KBM"])
+    sheet.append([f"Periode: {start_date} s.d. {end_date}"])
+    sheet.append([])
+    sheet.append([
+        "Kelas", "JP Terjadwal", "JP Tercatat", "Pelaksanaan (%)",
+        "Jumlah Jurnal", "Jumlah Sesi", "Jurnal Disubmit", "Jurnal Disetujui",
+    ])
+    for item in report["classes"]:
+        sheet.append([
+            item["class_name"], item["scheduled_jp"], item["recorded_jp"],
+            item["implementation_rate"], item["journals"], item["sessions"],
+            item["submitted"], item["approved"],
+        ])
+    sheet.append([])
+    sheet.append(["Total kelas", report["class_count"]])
+    sheet.append(["Total JP terjadwal", report["scheduled_jp"]])
+    sheet.append(["Total JP tercatat", report["recorded_jp"]])
+    sheet.append(["Total jurnal", report["journals"]])
+    sheet.append(["Total sesi", report["sessions"]])
+    sheet.append([])
+    sheet.append([report["schedule_note"]])
+    sheet.freeze_panes = "A5"
+    sheet.auto_filter.ref = f"A4:H{4 + len(report['classes'])}"
+    for cell in sheet[4]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="24527A")
+        cell.alignment = Alignment(horizontal="center")
+    for column, width in {
+        "A": 24, "B": 16, "C": 16, "D": 20,
+        "E": 16, "F": 14, "G": 18, "H": 18,
+    }.items():
+        sheet.column_dimensions[column].width = width
+    output = BytesIO()
+    workbook.save(output)
+    filename = f"rekap_kbm_{start_date}_{end_date}.xlsx"
+    return Response(
+        content=output.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get(
+    "/reports/kbm-implementation.pdf",
+    tags=["Reports"],
+    dependencies=[Depends(require_roles("admin"))],
+)
+def export_kbm_implementation_pdf(
+    start_date: date,
+    end_date: date,
+    class_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    report = build_kbm_implementation_report(db, start_date, end_date, class_id)
+    output = BytesIO()
+    document = SimpleDocTemplate(
+        output, pagesize=landscape(A4),
+        rightMargin=12 * mm, leftMargin=12 * mm,
+        topMargin=12 * mm, bottomMargin=12 * mm,
+    )
+    styles = getSampleStyleSheet()
+    elements = [
+        Paragraph("Rekap Pelaksanaan KBM", styles["Title"]),
+        Paragraph(f"Periode: {start_date} s.d. {end_date}", styles["Normal"]),
+        Spacer(1, 8 * mm),
+    ]
+    table_data = [[
+        "Kelas", "JP Jadwal", "JP Tercatat", "Pelaksanaan",
+        "Jurnal", "Sesi", "Disubmit", "Disetujui",
+    ]]
+    for item in report["classes"]:
+        rate = (
+            f"{item['implementation_rate']}%"
+            if item["implementation_rate"] is not None else "-"
+        )
+        table_data.append([
+            item["class_name"], item["scheduled_jp"], item["recorded_jp"],
+            rate, item["journals"], item["sessions"], item["submitted"],
+            item["approved"],
+        ])
+    table = Table(table_data, repeatRows=1, hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#24527A")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#EEF3F7")]),
+        ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    elements.extend([
+        table,
+        Spacer(1, 6 * mm),
+        Paragraph(
+            f"Total kelas: {report['class_count']} | "
+            f"JP terjadwal: {report['scheduled_jp']} | "
+            f"JP tercatat: {report['recorded_jp']} | "
+            f"Jurnal: {report['journals']} | Sesi: {report['sessions']}",
+            styles["Normal"],
+        ),
+        Spacer(1, 3 * mm),
+        Paragraph(report["schedule_note"], styles["Italic"]),
+    ])
+    document.build(elements)
+    filename = f"rekap_kbm_{start_date}_{end_date}.pdf"
+    return Response(
+        content=output.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
