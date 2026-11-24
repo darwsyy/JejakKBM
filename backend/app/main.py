@@ -92,6 +92,49 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok", "service": "jejak-kbm-api"}
 
 
+def ensure_journal_access(db: Session, journal: DailyJournal, user: User) -> None:
+    """Batasi jurnal ke admin, petugas kelas pemilik jurnal, guru pengajar, atau guru piket."""
+    if user.role == "admin":
+        return
+    if user.role == "class_officer" and journal.officer_user_id == user.id:
+        return
+    if user.role == "teacher":
+        teaches_journal = db.query(JournalSession.id).filter(
+            JournalSession.journal_id == journal.id,
+            JournalSession.teacher_id == user.id,
+        ).first()
+        is_duty_teacher = db.query(DutyRoster.id).filter(
+            DutyRoster.duty_date == journal.journal_date,
+            DutyRoster.teacher_user_id == user.id,
+        ).first()
+        if teaches_journal or is_duty_teacher:
+            return
+    raise HTTPException(status_code=403, detail="Anda tidak memiliki akses ke jurnal kelas ini.")
+
+
+def ensure_session_access(
+    db: Session, session: JournalSession, user: User
+) -> DailyJournal:
+    journal = db.query(DailyJournal).filter(
+        DailyJournal.id == session.journal_id
+    ).first()
+    if journal is None:
+        raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
+    if user.role == "admin":
+        return journal
+    if user.role == "class_officer" and journal.officer_user_id == user.id:
+        return journal
+    if user.role == "teacher":
+        is_session_teacher = session.teacher_id == user.id
+        is_duty_teacher = db.query(DutyRoster.id).filter(
+            DutyRoster.duty_date == journal.journal_date,
+            DutyRoster.teacher_user_id == user.id,
+        ).first()
+        if is_session_teacher or is_duty_teacher:
+            return journal
+    raise HTTPException(status_code=403, detail="Anda tidak memiliki akses ke sesi pembelajaran ini.")
+
+
 @app.post("/auth/bootstrap", response_model=UserResponse, status_code=201, tags=["Authentication"])
 def bootstrap_admin(data: AdminBootstrap, db: Session = Depends(get_db)):
     """Membuat admin pertama saat database belum memiliki admin ber-password."""
@@ -1653,8 +1696,25 @@ def get_daily_journals(
     class_id: int | None = None,
     journal_date: date | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     query = db.query(DailyJournal)
+    if current_user.role == "class_officer":
+        query = query.filter(DailyJournal.officer_user_id == int(current_user.id))
+    elif current_user.role == "teacher":
+        taught_journal_ids = db.query(JournalSession.journal_id).filter(
+            JournalSession.teacher_id == int(current_user.id)
+        )
+        duty_dates = db.query(DutyRoster.duty_date).filter(
+            DutyRoster.teacher_user_id == int(current_user.id)
+        )
+        from sqlalchemy import or_
+        query = query.filter(or_(
+            DailyJournal.id.in_(taught_journal_ids),
+            DailyJournal.journal_date.in_(duty_dates),
+        ))
+    elif current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Role tidak memiliki akses ke jurnal.")
     if class_id is not None:
         query = query.filter(DailyJournal.class_id == class_id)
     if journal_date is not None:
@@ -1663,7 +1723,11 @@ def get_daily_journals(
 
 
 @app.get("/dashboard/daily", response_model=DailyDashboardResponse, tags=["Dashboard"], dependencies=[Depends(get_current_user)])
-def get_daily_dashboard(report_date: date | None = None, db: Session = Depends(get_db)):
+def get_daily_dashboard(
+    report_date: date | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("admin")),
+):
     selected_date = report_date or date.today()
     classrooms = db.query(Classroom).order_by(Classroom.name).all()
     journals = db.query(DailyJournal).filter(
@@ -1694,10 +1758,15 @@ def get_daily_dashboard(report_date: date | None = None, db: Session = Depends(g
     response_model=DailyJournalResponse,
     tags=["Daily Journals"],
     dependencies=[Depends(get_current_user)])
-def get_daily_journal(journal_id: int, db: Session = Depends(get_db)):
+def get_daily_journal(
+    journal_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
     if journal is None:
         raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
+    ensure_journal_access(db, journal, current_user)
     return journal
 
 
@@ -1823,10 +1892,15 @@ def create_journal_session(
     response_model=list[JournalSessionResponse],
     tags=["Journal Sessions"],
     dependencies=[Depends(get_current_user)])
-def get_journal_sessions(journal_id: int, db: Session = Depends(get_db)):
+def get_journal_sessions(
+    journal_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
     if journal is None:
         raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
+    ensure_journal_access(db, journal, current_user)
     sessions = db.query(JournalSession).filter(
         JournalSession.journal_id == journal_id
     ).order_by(JournalSession.actual_start_time).all()
@@ -1913,10 +1987,15 @@ def create_attendance(
     response_model=list[AttendanceResponse],
     tags=["Attendance"],
     dependencies=[Depends(get_current_user)])
-def get_session_attendance(session_id: int, db: Session = Depends(get_db)):
+def get_session_attendance(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     session = db.query(JournalSession).filter(JournalSession.id == session_id).first()
     if session is None:
         raise HTTPException(status_code=404, detail="Sesi pembelajaran tidak ditemukan.")
+    ensure_session_access(db, session, current_user)
     records = db.query(AttendanceRecord).filter(
         AttendanceRecord.session_id == session_id
     ).order_by(AttendanceRecord.slot_id, AttendanceRecord.student_id).all()
@@ -2523,10 +2602,15 @@ def review_daily_journal(
 
 
 @app.get("/journals/{journal_id}/reviews", response_model=list[JournalReviewResponse], tags=["Journal Reviews"], dependencies=[Depends(get_current_user)])
-def get_journal_reviews(journal_id: int, db: Session = Depends(get_db)):
+def get_journal_reviews(
+    journal_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     journal = db.query(DailyJournal).filter(DailyJournal.id == journal_id).first()
     if journal is None:
         raise HTTPException(status_code=404, detail="Jurnal tidak ditemukan.")
+    ensure_journal_access(db, journal, current_user)
     reviews = db.query(JournalReview).filter(JournalReview.journal_id == journal_id).order_by(JournalReview.reviewed_at, JournalReview.id).all()
     results = []
     for review in reviews:
@@ -2807,6 +2891,7 @@ def get_class_dashboard(
     class_id: int,
     report_date: date | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     selected_date = report_date or date.today()
     classroom = db.query(Classroom).filter(Classroom.id == class_id).first()
@@ -2817,6 +2902,33 @@ def get_class_dashboard(
         DailyJournal.class_id == class_id,
         DailyJournal.journal_date == selected_date,
     ).first()
+    if journal is not None:
+        ensure_journal_access(db, journal, current_user)
+    elif current_user.role == "class_officer":
+        assigned = db.query(ClassOfficerPeriod.id).filter(
+            ClassOfficerPeriod.class_id == class_id,
+            ClassOfficerPeriod.user_id == int(current_user.id),
+            ClassOfficerPeriod.start_date <= selected_date,
+            (ClassOfficerPeriod.end_date.is_(None))
+            | (ClassOfficerPeriod.end_date >= selected_date),
+        ).first()
+        if assigned is None:
+            raise HTTPException(status_code=403, detail="Anda tidak memiliki akses ke kelas ini.")
+    elif current_user.role == "teacher":
+        is_scheduled = db.query(ScheduleTeacherAssignment.id).join(
+            ScheduleSlot, ScheduleSlot.id == ScheduleTeacherAssignment.slot_id
+        ).filter(
+            ScheduleTeacherAssignment.teacher_id == int(current_user.id),
+            ScheduleSlot.class_id == class_id,
+        ).first()
+        is_duty = db.query(DutyRoster.id).filter(
+            DutyRoster.teacher_user_id == int(current_user.id),
+            DutyRoster.duty_date == selected_date,
+        ).first()
+        if not is_scheduled and not is_duty:
+            raise HTTPException(status_code=403, detail="Anda tidak memiliki akses ke kelas ini.")
+    elif current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Role tidak memiliki akses ke dashboard kelas.")
     attendance_statuses = ["PRESENT", "SICK", "PERMITTED", "DISPENSED", "ABSENT"]
     total_counts = {name: 0 for name in attendance_statuses}
     session_results = []
